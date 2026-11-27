@@ -232,7 +232,7 @@ aliases. Check `GET /mcp` for the resource metadata challenge,
 `GET /oauth/resource` for the protected resource JSON, and
 `GET /.well-known/oauth-authorization-server` for authorization metadata.
 All three must refer to the same canonical HTTPS issuer. The
-`X-MCP-Adapter: edgeone-oauth-discovery-v4` and `X-MCP-OAuth` response headers
+`X-MCP-Adapter: edgeone-oauth-discovery-v5` and `X-MCP-OAuth` response headers
 identify the updated adapter and whether an issuer is configured without
 revealing any credentials. If the adapter header is absent, check the
 production deployment commit and build logs before debugging OAuth.
@@ -243,12 +243,9 @@ same-origin POST is also supported. Foreign origins, cross-site form
 submissions, invalid cookies, and expired encrypted flow tickets are rejected.
 
 Authorization popups use independent CSRF cookies so concurrent flows do not
-overwrite each other. Successful or cancelled authorization sends HTTP 303
-to the validated callback, with an HTML continuation link as a fallback
-for webviews that display the redirect response instead of following it.
-
-The form's CSP allows its own origin and the already validated OAuth callback
-origin. Chromium also applies `form-action` to redirect destinations, so
-restricting it to self would block both approval and cancellation. The
-server still validates the exact registered redirect URI and sends a 303,
-which converts the password POST into a GET without its body.
+overwrite each other. Successful or cancelled form submissions return HTTP 200
+with a nonce-authorized script that calls `window.location.replace()` on the
+validated callback. A manual continuation link is available on the same page.
+The password form submits only to the server itself; the callback is a fresh
+GET without the password. Authorization-request errors before the form retain
+the usual OAuth HTTP 303 redirect.

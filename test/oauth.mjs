@@ -10,6 +10,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
+import { runInNewContext } from "node:vm";
 
 const issuer = "https://test.example";
 const resource = issuer + "/mcp";
@@ -46,10 +47,10 @@ async function exercise(name, call) {
   const cookie=login.headers.get("set-cookie").split(";")[0];
   const page=await login.text();
   assert.match(page,/type="password"/);
-  assert.match(login.headers.get("content-security-policy"), /form-action 'self' https:\/\/chatgpt\.com;/);
+  assert.match(login.headers.get("content-security-policy"), /form-action 'self';/);
   const wrongForm = await post("/oauth/authorize",{flow:page.match(/name="flow" value="([^"]+)"/)[1],password:"wrong"},"form",{origin:issuer});
   assert.equal(wrongForm.status,401);
-  assert.match(wrongForm.headers.get("content-security-policy"), /form-action 'self' https:\/\/chatgpt\.com;/);
+  assert.match(wrongForm.headers.get("content-security-policy"), /form-action 'self';/);
   const flow=page.match(/name="flow" value="([^"]+)"/)[1];
   assert.equal((await post("/oauth/authorize",{flow,password})).status,400);
   assert.equal(login.headers.get("referrer-policy"),"same-origin");
@@ -72,18 +73,36 @@ async function exercise(name, call) {
   assert.equal((await post("/oauth/authorize",{flow,password},"form",{cookie,origin:issuer,"sec-fetch-site":"cross-site"})).status,400);
   assert.equal((await post("/oauth/authorize",{flow,password:"wrong"},"form",{cookie,origin:issuer})).status,401);
   const approved=await post("/oauth/authorize",{flow,password},"form",{origin:issuer});
-  assert.equal(approved.status,303);
-  assert.match(approved.headers.get("content-type"),/text\/html/);
-  const fallback=await approved.text();
-  assert.match(fallback,/Authorization successful/);
-  assert.match(fallback,/Continue to ChatGPT/);
-  const callback=new URL(approved.headers.get("location"));
-  const fallbackUrl=fallback.match(/href="([^"]+)"/)[1].replace(/&amp;/g,"&");
-  assert.equal(fallbackUrl,callback.href);
-  assert.equal(callback.origin,"https://chatgpt.com");
+  async function checkContinuation(response, expectedTitle) {
+    assert.equal(response.status,200);
+    assert.equal(response.headers.get("location"),null);
+    assert.match(response.headers.get("content-type"),/text\/html/);
+    const body=await response.text();
+    assert(body.includes(expectedTitle));
+    assert.match(body,/Continue to ChatGPT/);
+    assert(!body.includes(password));
+    const href=body.match(/id="oauth-continue" href="([^"]+)"/)[1].replace(/&amp;/g,"&");
+    const [,nonce,script]=body.match(/<script nonce="([^"]+)">([^<]+)<\/script>/);
+    assert(response.headers.get("content-security-policy").includes("script-src 'nonce-"+nonce+"'"));
+    let destination;
+    runInNewContext(script,{
+      document:{getElementById(id){assert.equal(id,"oauth-continue");return {href};}},
+      window:{location:{replace(url){destination=url;}}},
+    });
+    assert.equal(destination,href);
+    const callback=new URL(destination);
+    assert.equal(callback.origin,"https://chatgpt.com");
+    assert.equal(callback.pathname,new URL(redirect).pathname);
+    return callback;
+  }
+  const callback=await checkContinuation(approved,"Authorization successful");
   const cancelled=await post("/oauth/authorize",{flow,deny:"1"},"form",{origin:issuer});
-  assert.equal(cancelled.status,303);
-  assert.equal(new URL(cancelled.headers.get("location")).searchParams.get("error"),"access_denied");
+  const cancelCallback=await checkContinuation(cancelled,"Authorization cancelled");
+  assert.equal(cancelCallback.searchParams.get("error"),"access_denied");
+  assert.equal(cancelCallback.searchParams.get("state"),"test-state");
+  const invalid=await call("/oauth/authorize?"+new URLSearchParams({...authParams,response_type:"token"}));
+  assert.equal(invalid.status,303);
+  assert.equal(new URL(invalid.headers.get("location")).searchParams.get("error"),"unsupported_response_type");
   assert.equal(callback.searchParams.get("state"),"test-state");
   assert.equal(callback.searchParams.get("iss"),issuer);
   const code=callback.searchParams.get("code");

@@ -1,3 +1,4 @@
+import { oauthToolMetadata } from "../auth/oauth.js";
 import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -25,6 +26,7 @@ export function registerPlaywrightTools(mcp: McpServer, ctx: AppContext, princip
   mcp.registerTool(
     "playwright_list_services",
     {
+      ...(ctx.oauthEnabled ? { _meta: oauthToolMetadata } : {}),
       title: "List browser services",
       description:
         "List implemented browser services whose credentials are configured and allowed. Makes no network calls and never reveals keys or endpoints.",
@@ -60,6 +62,7 @@ export function registerPlaywrightTools(mcp: McpServer, ctx: AppContext, princip
     mcp.registerTool(
       "playwright_open",
       {
+        ...(ctx.oauthEnabled ? { _meta: oauthToolMetadata } : {}),
         title: "Open remote browser",
         description:
           "Create a remote browser session and return an opaque browser_id. In provider-managed mode select a reconnectable service from playwright_list_services; otherwise select any configured service. When omitted, the server selects a compatible service.",
@@ -76,6 +79,7 @@ export function registerPlaywrightTools(mcp: McpServer, ctx: AppContext, princip
     mcp.registerTool(
       "playwright_navigate",
       {
+        ...(ctx.oauthEnabled ? { _meta: oauthToolMetadata } : {}),
         title: "Navigate",
         description:
           "Navigate the session to an allowlisted HTTP(S) URL. Returns the settled URL, title and HTTP status when available.",
@@ -96,6 +100,7 @@ export function registerPlaywrightTools(mcp: McpServer, ctx: AppContext, princip
     mcp.registerTool(
       "playwright_snapshot",
       {
+        ...(ctx.oauthEnabled ? { _meta: oauthToolMetadata } : {}),
         title: "Page snapshot",
         description:
           "Return size-limited page text (or HTML when there is no visible text), plus URL and title.",
@@ -117,6 +122,7 @@ export function registerPlaywrightTools(mcp: McpServer, ctx: AppContext, princip
     mcp.registerTool(
       "playwright_click",
       {
+        ...(ctx.oauthEnabled ? { _meta: oauthToolMetadata } : {}),
         title: "Click",
         description: "Click the first element matching the selector and return the resulting URL.",
         inputSchema: z.object({
@@ -136,6 +142,7 @@ export function registerPlaywrightTools(mcp: McpServer, ctx: AppContext, princip
     mcp.registerTool(
       "playwright_fill",
       {
+        ...(ctx.oauthEnabled ? { _meta: oauthToolMetadata } : {}),
         title: "Fill field",
         description: "Fill an input matched by the selector. The value is never echoed back.",
         inputSchema: z.object({
@@ -156,6 +163,7 @@ export function registerPlaywrightTools(mcp: McpServer, ctx: AppContext, princip
     mcp.registerTool(
       "playwright_press",
       {
+        ...(ctx.oauthEnabled ? { _meta: oauthToolMetadata } : {}),
         title: "Press key",
         description:
           "Press a keyboard key, either on the element matching the selector or on the focused element.",
@@ -177,6 +185,7 @@ export function registerPlaywrightTools(mcp: McpServer, ctx: AppContext, princip
     mcp.registerTool(
       "playwright_screenshot",
       {
+        ...(ctx.oauthEnabled ? { _meta: oauthToolMetadata } : {}),
         title: "Screenshot",
         description: "Capture a JPEG screenshot of the current page within the configured size limit.",
         inputSchema: z.object({
@@ -205,6 +214,7 @@ export function registerPlaywrightTools(mcp: McpServer, ctx: AppContext, princip
     mcp.registerTool(
       "playwright_evaluate",
       {
+        ...(ctx.oauthEnabled ? { _meta: oauthToolMetadata } : {}),
         title: "Evaluate JavaScript (privileged)",
         description:
           "Evaluate a JavaScript expression (or a function called with `argument`) in the page and return a size-limited JSON result. Disabled unless BROWSER_ENABLE_EVALUATE=true. Runs with the page's privileges and is not a sandbox: it can change the page or send requests.",
@@ -237,6 +247,7 @@ export function registerPlaywrightTools(mcp: McpServer, ctx: AppContext, princip
     mcp.registerTool(
       "playwright_close",
       {
+        ...(ctx.oauthEnabled ? { _meta: oauthToolMetadata } : {}),
         title: "Close browser",
         description: "Close the Playwright connection and release the provider session. Idempotent.",
         inputSchema: z.object({ browser_id: browserId }),
@@ -272,6 +283,7 @@ function registerActTool(mcp: McpServer, ctx: AppContext, principal: string): vo
   if (ctx.sessionMode !== "request") mcp.registerTool(
     "playwright_act",
     {
+      ...(ctx.oauthEnabled ? { _meta: oauthToolMetadata } : {}),
       title: "Run action sequence",
       description:
         "Run an ordered, bounded sequence of ordinary browser interactions (navigate, click, fill, press, wait_for_selector, scroll_into_view, wait). No JavaScript or CDP is used.",
@@ -286,6 +298,7 @@ function registerActTool(mcp: McpServer, ctx: AppContext, principal: string): vo
   mcp.registerTool(
     "playwright_run",
     {
+      ...(ctx.oauthEnabled ? { _meta: oauthToolMetadata } : {}),
       title: "Run browser workflow in one request",
       description: "Open a remote browser, run a bounded action sequence, capture a final text snapshot and optional JPEG screenshot, and close the browser in the same request. Suitable for serverless runtimes; no browser_id is required or retained.",
       inputSchema: z.object({

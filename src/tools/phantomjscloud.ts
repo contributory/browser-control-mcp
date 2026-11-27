@@ -1,3 +1,4 @@
+import { oauthToolMetadata } from "../auth/oauth.js";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { PhantomJsCloudFormat } from "../providers/phantomjscloud.js";
@@ -22,6 +23,7 @@ export function registerPhantomJsCloudTools(mcp: McpServer, ctx: AppContext, pri
   mcp.registerTool(
     "phantomjscloud_status",
     {
+      ...(ctx.oauthEnabled ? { _meta: oauthToolMetadata } : {}),
       title: "PhantomJSCloud status",
       description:
         "Report whether PhantomJSCloud render tools are available (API key configured and service allowed). Makes no network calls.",
@@ -41,6 +43,7 @@ export function registerPhantomJsCloudTools(mcp: McpServer, ctx: AppContext, pri
   mcp.registerTool(
     "phantomjscloud_render",
     {
+      ...(ctx.oauthEnabled ? { _meta: oauthToolMetadata } : {}),
       title: "Render URL with PhantomJSCloud",
       description:
         "Render an allowlisted URL with the PhantomJSCloud HTTP automation API. Returns an image, PDF (base64), HTML, or plain text within the configured size limits. This is not a Playwright session.",

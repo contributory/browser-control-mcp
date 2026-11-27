@@ -1,3 +1,4 @@
+import type { OAuthServer } from "../auth/oauth.js";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
@@ -7,6 +8,9 @@ import { registerTools } from "../tools/index.js";
 export interface WebHandlerOptions {
   /** EdgeOne's Request body is not guaranteed to be a WHATWG ReadableStream. */
   nativeBodyReader?: boolean;
+  oauth?: OAuthServer;
+  /** Convex HTTP action has already verified OAuth and passed only the credential index. */
+  oauthHandledUpstream?: boolean;
 }
 
 /** Direct, stateless MCP handler for Node runtimes that provide Request/Response. */
@@ -29,7 +33,7 @@ export function createWebHandler(ctx: AppContext, options: WebHandlerOptions = {
       headers.set("Access-Control-Allow-Origin", origin);
       headers.set("Vary", "Origin");
       headers.set("Access-Control-Allow-Headers", "authorization, content-type, mcp-protocol-version, mcp-session-id");
-      headers.set("Access-Control-Expose-Headers", "mcp-session-id");
+      headers.set("Access-Control-Expose-Headers", "mcp-session-id, www-authenticate");
       headers.set("Access-Control-Allow-Methods", "POST, OPTIONS");
     }
     if (request.method === "OPTIONS") return respond(204);
@@ -39,8 +43,12 @@ export function createWebHandler(ctx: AppContext, options: WebHandlerOptions = {
     for (const credential of credentials) {
       if (timingSafeEqual(supplied, credential.digest)) principal = credential.principal;
     }
+    if (!principal && options.oauth) {
+      const index = await options.oauth.authenticate(request.headers.get("authorization"));
+      if (index >= 0) principal = credentials[index]?.principal;
+    }
     if (!principal) {
-      headers.set("WWW-Authenticate", "Bearer");
+      headers.set("WWW-Authenticate", options.oauth?.challenge(Boolean(request.headers.get("authorization"))) ?? "Bearer");
       return respond(401);
     }
 

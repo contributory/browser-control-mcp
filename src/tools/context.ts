@@ -8,5 +8,6 @@ export interface AppContext {
   providers: Providers;
   sessions: BrowserSessions;
   /** Serverless invocations cannot guarantee persistent browser connections. */
+  oauthEnabled?: boolean;
   sessionMode?: "persistent" | "provider-managed" | "request";
 }

@@ -21,7 +21,7 @@ export const handle = internalActionGeneric({
     const request = new Request("https://convex.internal/mcp", {
       method: args.method, headers, body: args.body,
     });
-    const response = await handleServerless(request, process.env);
+    const response = await handleServerless(request, process.env, { oauthHandledUpstream: true });
     return {
       status: response.status,
       headers: [...response.headers.entries()],

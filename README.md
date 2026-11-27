@@ -170,3 +170,45 @@ for the local type and handler tests.
 The standalone `npm start` mode is unchanged and continues to expose the full
 persistent browser-session and diagnostic tool set. Both serverless adapters
 use the shared provider-managed registry and one-call workflow described above.
+
+
+## Stateless OAuth (ChatGPT)
+
+Set the following environment variables on any deployment, and redeploy:
+
+- `MCP_AUTH_TOKEN`: the existing password. Use a long, random value.
+- `MCP_OAUTH_ISSUER`: canonical HTTPS origin of the server, without `/mcp`.
+  For local testing only, HTTP loopback origins are accepted.
+- `MCP_OAUTH_SECRET`: a separate random server-only key, at least 32
+  characters (`openssl rand -hex 32`). Keep it stable across instances.
+- Optional `MCP_OAUTH_REDIRECT_URIS`: extra exact HTTPS redirect URLs.
+  ChatGPT's documented connector callbacks are already allowed.
+
+Add the public `/mcp` URL to ChatGPT using OAuth. Discovery exposes resource
+metadata, authorization-server metadata, dynamic client registration (public
+clients), authorization code with PKCE S256, and the token endpoint. The
+authorization page displays an **Auth password** field. Enter the configured
+MCP password. Existing direct Bearer clients continue working.
+
+No Redis, KV, database, session registry or external identity provider is
+needed for OAuth, including on EdgeOne and Convex. Each invocation validates
+self-contained AES-GCM credentials against the configured issuer, scope,
+client identity and password subject. Authorization codes expire after two
+minutes; access tokens after one hour. The refresh token is reusable and has
+no fixed expiry: each refresh verifies the subject against the current
+`MCP_AUTH_TOKEN`. It is a distinct encrypted credential, not the raw password.
+Changing/removing the password invalidates its credentials; rotating the
+OAuth secret invalidates all issued client IDs and tokens.
+
+**Private-deployment tradeoffs:** without shared state, an authorization code
+can be redeemed again with its original PKCE verifier before it expires,
+refresh tokens are not rotated or individually revocable, and there is no
+distributed login-attempt counter. This is not full OAuth replay protection.
+Restrict deployments to trusted users, enforce request rate limits at the
+platform/gateway, and use high-entropy passwords. Do not use this mode as a
+public multi-tenant OAuth authorization server. See the [ChatGPT OAuth
+documentation](https://developers.openai.com/plugins/build/auth).
+
+Run `npm run build:edgeone && node test/oauth.mjs` for the local end-to-end
+OAuth tests on standalone, serverless and bundled Convex handlers. Test
+well-known route rewrites and the actual ChatGPT connection after deployment.

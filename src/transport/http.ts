@@ -1,3 +1,4 @@
+import { createOAuth, isOAuthPath, type OAuthServer } from "../auth/oauth.js";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -21,6 +22,9 @@ export interface HttpService {
  */
 export function createHttpService(ctx: AppContext): HttpService {
   const { config } = ctx;
+  const env = config.providerEnv;
+  const oauth = createOAuth(env);
+  ctx = { ...ctx, oauthEnabled: Boolean(oauth) };
   const credentials = config.authTokens.map(token => ({
     header: Buffer.from(`Bearer ${token}`),
     principal: principalId(token),
@@ -29,7 +33,7 @@ export function createHttpService(ctx: AppContext): HttpService {
   const server = createServer(
     { requestTimeout: config.http.requestTimeoutMs },
     (request, response) => {
-      void handle(ctx, credentials, request, response).catch(() => {
+      void handle(ctx, credentials, request, response, oauth).catch(() => {
         if (!response.headersSent) response.writeHead(500);
         response.end();
       });
@@ -62,9 +66,32 @@ async function handle(
   credentials: readonly Credential[],
   request: IncomingMessage,
   response: ServerResponse,
+  oauth?: OAuthServer,
 ): Promise<void> {
   const { config } = ctx;
   const url = new URL(request.url ?? "/", "http://localhost");
+  if (oauth && isOAuthPath(url.pathname)) {
+    const headers = new Headers();
+    for (const [name, value] of Object.entries(request.headers)) {
+      if (value !== undefined) headers.set(name, Array.isArray(value) ? value.join(", ") : value);
+    }
+    const chunks: Buffer[] = [];
+    let size = 0;
+    if (Number(headers.get("content-length")) > 32768) { response.writeHead(413).end(); return; }
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      for await (const chunk of request) {
+        size += chunk.length;
+        if (size > 32768) { response.writeHead(413).end(); return; }
+        chunks.push(Buffer.from(chunk));
+      }
+    }
+    const authResponse = await oauth.route(new Request(oauth.issuer + url.pathname + url.search, {
+      method: request.method, headers, body: size ? Buffer.concat(chunks) : undefined,
+    }));
+    response.writeHead(authResponse.status, Object.fromEntries(authResponse.headers));
+    response.end(authResponse.body === null ? undefined : await authResponse.text());
+    return;
+  }
   if (url.pathname !== MCP_PATH) {
     response.writeHead(404).end();
     return;
@@ -79,7 +106,7 @@ async function handle(
     response.setHeader("Access-Control-Allow-Origin", origin);
     response.setHeader("Vary", "Origin");
     response.setHeader("Access-Control-Allow-Headers", "authorization, content-type, mcp-protocol-version, mcp-session-id");
-    response.setHeader("Access-Control-Expose-Headers", "mcp-session-id");
+    response.setHeader("Access-Control-Expose-Headers", "mcp-session-id, www-authenticate");
     response.setHeader("Access-Control-Allow-Methods", "POST, GET, DELETE, OPTIONS");
   }
   if (request.method === "OPTIONS") {
@@ -87,9 +114,13 @@ async function handle(
     return;
   }
 
-  const principal = authenticate(credentials, request.headers.authorization);
+  let principal = authenticate(credentials, request.headers.authorization);
+  if (!principal && oauth) {
+    const index = await oauth.authenticate(request.headers.authorization);
+    if (index >= 0) principal = credentials[index]?.principal ?? null;
+  }
   if (!principal) {
-    response.writeHead(401, { "WWW-Authenticate": "Bearer" }).end();
+    response.writeHead(401, { "WWW-Authenticate": oauth?.challenge(Boolean(request.headers.authorization)) ?? "Bearer" }).end();
     return;
   }
 

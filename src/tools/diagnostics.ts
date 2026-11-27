@@ -1,3 +1,4 @@
+import { oauthToolMetadata } from "../auth/oauth.js";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ToolError } from "../util/errors.js";
@@ -18,6 +19,7 @@ export function registerDiagnosticTools(mcp: McpServer, ctx: AppContext, princip
     mcp.registerTool(
       "playwright_console",
       {
+        ...(ctx.oauthEnabled ? { _meta: oauthToolMetadata } : {}),
         title: "Console diagnostics",
         description:
           "Start, read, or clear a bounded buffer of console messages and page errors. Reads drain the buffer and report how many entries were dropped.",
@@ -38,6 +40,7 @@ export function registerDiagnosticTools(mcp: McpServer, ctx: AppContext, princip
     mcp.registerTool(
       "playwright_network",
       {
+        ...(ctx.oauthEnabled ? { _meta: oauthToolMetadata } : {}),
         title: "Network diagnostics",
         description:
           "Start, read, or clear a bounded buffer of request and response metadata. Headers and bodies are never captured; URL query strings are stripped.",
@@ -60,6 +63,7 @@ export function registerDiagnosticTools(mcp: McpServer, ctx: AppContext, princip
   mcp.registerTool(
     "playwright_cdp_send",
     {
+      ...(ctx.oauthEnabled ? { _meta: oauthToolMetadata } : {}),
       title: "CDP command (read-only, privileged)",
       description:
         "Send one allowlisted, read-only CDP command to the current page target and return size-limited JSON. Disabled unless BROWSER_ENABLE_CDP=true. Arbitrary methods, target ids and endpoints are rejected.",
@@ -89,6 +93,7 @@ export function registerDiagnosticTools(mcp: McpServer, ctx: AppContext, princip
   if (ctx.sessionMode !== "provider-managed") mcp.registerTool(
     "playwright_cdp_events",
     {
+      ...(ctx.oauthEnabled ? { _meta: oauthToolMetadata } : {}),
       title: "CDP event subscriptions (read-only, privileged)",
       description:
         "Subscribe to allowlisted page CDP events, read a buffered batch, or unsubscribe. Each subscription is owned by this browser session and principal, is bounded, and reports dropped events. Not a real-time stream. Disabled unless BROWSER_ENABLE_CDP=true.",

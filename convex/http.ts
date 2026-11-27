@@ -1,6 +1,13 @@
+import { createOAuth } from "../src/auth/oauth.js";
 import { httpRouter, httpActionGeneric, makeFunctionReference } from "convex/server";
 
 const http = httpRouter();
+const oauthRoute = httpActionGeneric(async (_ctx, request) => {
+  try {
+    const oauth = createOAuth(process.env);
+    return oauth ? oauth.route(request) : new Response(null, { status: 404 });
+  } catch { return new Response("OAuth configuration is invalid", { status: 503, headers: { "Cache-Control": "no-store" } }); }
+});
 const invoke = makeFunctionReference<"action", {
   method: string;
   headers: [string, string][];
@@ -12,6 +19,8 @@ const mcp = httpActionGeneric(async (ctx, request) => {
   const headers = new Headers({ "Cache-Control": "no-store" });
   const respond = (status: number, body: string | null = null) => new Response(body, { status, headers });
   const tokens = (process.env.MCP_AUTH_TOKEN ?? "").split(",").map(s => s.trim()).filter(Boolean);
+  let oauth;
+  try { oauth = createOAuth(process.env); } catch { return respond(503, "OAuth configuration is invalid"); }
   if (tokens.length === 0) return respond(503, "MCP server configuration is missing or invalid");
 
   const origin = request.headers.get("origin");
@@ -22,7 +31,7 @@ const mcp = httpActionGeneric(async (ctx, request) => {
     headers.set("Vary", "Origin");
     headers.set("Access-Control-Allow-Headers", "authorization, content-type, mcp-protocol-version, mcp-session-id");
     headers.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-    headers.set("Access-Control-Expose-Headers", "mcp-session-id");
+    headers.set("Access-Control-Expose-Headers", "mcp-session-id, www-authenticate");
   }
   if (request.method === "OPTIONS") return respond(204);
 
@@ -38,8 +47,9 @@ const mcp = httpActionGeneric(async (ctx, request) => {
     }
     if (difference === 0) tokenIndex = i;
   }
+  if (tokenIndex < 0 && oauth) tokenIndex = await oauth.authenticate(supplied);
   if (tokenIndex < 0) {
-    headers.set("WWW-Authenticate", "Bearer");
+    headers.set("WWW-Authenticate", oauth?.challenge(Boolean(supplied)) ?? "Bearer");
     return respond(401);
   }
   if (request.method !== "POST") {
@@ -95,5 +105,11 @@ const mcp = httpActionGeneric(async (ctx, request) => {
 
 for (const method of ["GET", "POST", "DELETE", "OPTIONS", "PUT", "PATCH"] as const) {
   http.route({ path: "/mcp", method, handler: mcp });
+}
+for (const path of ["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-authorization-server", "/oauth/resource", "/oauth/metadata", "/oauth/authorize"]) {
+  http.route({ path, method: "GET", handler: oauthRoute });
+}
+for (const path of ["/oauth/authorize", "/oauth/register", "/oauth/token"]) {
+  http.route({ path, method: "POST", handler: oauthRoute });
 }
 export default http;

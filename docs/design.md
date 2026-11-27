@@ -87,3 +87,23 @@ provider API rather than accepting a client-supplied endpoint. The provider
 maintains page state and enforces a hard lifetime; the MCP invocation opens and
 disposes only its local Playwright connection. See README for the limitations
 of stateless admission checks, idle timeout, and event subscriptions.
+
+
+## Stateless OAuth for private deployments
+
+The same Web Crypto authorization implementation runs in the Node and Convex
+HTTP runtimes. The canonical issuer, token type and password-derived HMAC
+subject bind encrypted OAuth client registration, flow, code, access and
+refresh credentials. PKCE and exact callback allowlisting constrain code
+exchange; a CSRF cookie binds the browser consent form. The refresh credential
+is reusable until the corresponding configured password or OAuth secret
+changes. No raw password is returned by the token endpoint. The existing
+Bearer-token principal is preserved for browser ownership.
+
+This mode intentionally trades one-time code consumption, refresh rotation,
+individual revocation and distributed rate limiting for stateless deployment.
+An unexpired authorization code and its verifier can be replayed; use only
+for private trusted deployments with external rate limiting. The OAuth
+discovery and public-client flow follow the integration shape documented at
+https://developers.openai.com/plugins/build/auth; live client acceptance
+must be tested on the deployed endpoint.

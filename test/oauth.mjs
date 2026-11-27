@@ -46,6 +46,10 @@ async function exercise(name, call) {
   const cookie=login.headers.get("set-cookie").split(";")[0];
   const page=await login.text();
   assert.match(page,/type="password"/);
+  assert.match(login.headers.get("content-security-policy"), /form-action 'self' https:\/\/chatgpt\.com;/);
+  const wrongForm = await post("/oauth/authorize",{flow:page.match(/name="flow" value="([^"]+)"/)[1],password:"wrong"},"form",{origin:issuer});
+  assert.equal(wrongForm.status,401);
+  assert.match(wrongForm.headers.get("content-security-policy"), /form-action 'self' https:\/\/chatgpt\.com;/);
   const flow=page.match(/name="flow" value="([^"]+)"/)[1];
   assert.equal((await post("/oauth/authorize",{flow,password})).status,400);
   assert.equal(login.headers.get("referrer-policy"),"same-origin");
@@ -77,6 +81,9 @@ async function exercise(name, call) {
   const fallbackUrl=fallback.match(/href="([^"]+)"/)[1].replace(/&amp;/g,"&");
   assert.equal(fallbackUrl,callback.href);
   assert.equal(callback.origin,"https://chatgpt.com");
+  const cancelled=await post("/oauth/authorize",{flow,deny:"1"},"form",{origin:issuer});
+  assert.equal(cancelled.status,303);
+  assert.equal(new URL(cancelled.headers.get("location")).searchParams.get("error"),"access_denied");
   assert.equal(callback.searchParams.get("state"),"test-state");
   assert.equal(callback.searchParams.get("iss"),issuer);
   const code=callback.searchParams.get("code");

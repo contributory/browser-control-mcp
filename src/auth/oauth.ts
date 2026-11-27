@@ -195,14 +195,18 @@ export class OAuthServer {
     const code_challenge = params.get("code_challenge") ?? "";
     if (params.get("code_challenge_method") !== "S256" || !/^[A-Za-z0-9_-]{43}$/.test(code_challenge)) return reject("invalid_request");
     const flow: Flow = { client_id, redirect_uri, code_challenge, state, nonce:random(), exp:now()+loginTTL };
-    return this.form(await this.seal("flow",flow), flow.nonce);
+    return this.form(await this.seal("flow",flow), flow.nonce, flow.redirect_uri);
   }
 
-  private form(ticket: string, nonce: string, message = "", status = 200) {
+  private form(ticket: string, nonce: string, redirectUri: string, message = "", status = 200) {
     const secure = this.issuer.startsWith("https:") ? "; Secure" : "";
+    // Chrome enforces form-action on redirect destinations too. This callback
+    // was already checked against the registered client and server allowlist.
+    // A 303 changes the POST to GET; the password is never sent to the callback.
+    const callbackOrigin = new URL(redirectUri).origin;
     return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Browser Control MCP · Authorize</title><style>body{font:16px system-ui,sans-serif;background:#f5f6f8;color:#17202c;display:grid;min-height:95vh;place-items:center;margin:0}main{background:white;padding:32px;border-radius:16px;width:min(360px,85vw);box-shadow:0 8px 30px #0001}h1{font-size:23px;margin:0 0 12px}p{line-height:1.5;color:#445}label{display:block;font-weight:600}input,button{box-sizing:border-box;width:100%;padding:12px;margin-top:8px;border-radius:8px;border:1px solid #aab}button{background:#152b44;color:white;font-weight:600;cursor:pointer}.error{color:#b42318}</style><main><h1>Connect Browser Control MCP</h1><p>Enter the MCP auth password to authorize browser control for this client.</p><p class="error" role="alert">${html(message)}</p><form method="post" target="_self" action="${html(this.issuer+"/oauth/authorize")}"><input type="hidden" name="flow" value="${html(ticket)}"><label for="password">Auth password</label><input id="password" type="password" name="password" required autocomplete="current-password" maxlength="4096" autofocus><button type="submit">Authorize</button><button type="submit" name="deny" value="1" formnovalidate>Cancel</button></form></main></html>`, { status, headers:{
       "content-type":"text/html; charset=utf-8", "cache-control":"no-store", "pragma":"no-cache", "referrer-policy":"same-origin", "x-frame-options":"DENY", "x-content-type-options":"nosniff",
-      "content-security-policy":"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+      "content-security-policy":"default-src 'none'; style-src 'unsafe-inline'; form-action 'self' " + callbackOrigin + "; frame-ancestors 'none'; base-uri 'none'",
       "set-cookie":"mcp_oauth_csrf_"+nonce.slice(0,16)+"="+nonce+"; Path=/oauth/authorize; HttpOnly; SameSite=Lax; Max-Age="+loginTTL+secure,
     } });
   }
@@ -242,7 +246,7 @@ export class OAuthServer {
     if (params.get("deny") === "1") return this.redirect(flow.redirect_uri,flow.state,{error:"access_denied"});
     const supplied = params.get("password") ?? "";
     const index = await this.passwordIndex(supplied);
-    if (index < 0) return this.form(ticket,flow.nonce,"Incorrect auth password.",401);
+    if (index < 0) return this.form(ticket,flow.nonce,flow.redirect_uri,"Incorrect auth password.",401);
     const grant: Grant = { client_id:flow.client_id,resource:this.resource,scope:OAUTH_SCOPE,exp:now()+codeTTL,redirect_uri:flow.redirect_uri,code_challenge:flow.code_challenge };
     // Short-lived sealed code binds the password key, client, redirect and
     // PKCE challenge. Without shared state it cannot be atomically consumed.

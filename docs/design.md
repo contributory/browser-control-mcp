@@ -92,12 +92,16 @@ of stateless admission checks, idle timeout, and event subscriptions.
 ## Stateless OAuth for private deployments
 
 The same Web Crypto authorization implementation runs in the Node and Convex
-HTTP runtimes. The canonical issuer, token type and password-derived HMAC
-subject bind encrypted OAuth client registration, flow, code, access and
-refresh credentials. PKCE and exact callback allowlisting constrain code
+HTTP runtimes. The canonical issuer and token type bind AES-GCM encrypted OAuth client
+registration, flow, code, access and refresh credentials. Each configured
+MCP password supplies its own AES-256 key via SHA-256 with an issuer-specific
+domain separator. The authenticated decryption
+key determines the principal, never a client-supplied owner field. PKCE and exact callback allowlisting constrain code
 exchange; a CSRF cookie binds the browser consent form. The refresh credential
-is reusable until the corresponding configured password or OAuth secret
-changes. No raw password is returned by the token endpoint. The existing
+is reusable until its corresponding configured password is removed.
+No separate OAuth secret is required. Client registration IDs are sealed
+with the first configured password and need re-registration if that key is
+removed. No raw password is returned by the token endpoint. The existing
 Bearer-token principal is preserved for browser ownership.
 
 This mode intentionally trades one-time code consumption, refresh rotation,

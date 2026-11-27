@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, createDecipheriv } from "node:crypto";
 import { handleServerless } from "../dist/transport/serverless.js";
 import { createOAuth } from "../dist/auth/oauth.js";
 import { createHttpService } from "../dist/transport/http.js";
@@ -14,8 +14,7 @@ import { createRequire } from "node:module";
 const issuer = "https://test.example";
 const resource = issuer + "/mcp";
 const password = "test-password-not-a-production-secret";
-const secret = randomBytes(32).toString("hex");
-const env = { MCP_AUTH_TOKEN: password, MCP_OAUTH_ISSUER: issuer, MCP_OAUTH_SECRET: secret, BROWSER_ALLOWED_SERVICES: "no-provider" };
+const env = { MCP_AUTH_TOKEN: password, MCP_OAUTH_ISSUER: issuer, BROWSER_ALLOWED_SERVICES: "no-provider" };
 const redirect = "https://chatgpt.com/connector_platform_oauth_redirect";
 const verifier = randomBytes(32).toString("base64url");
 const challenge = createHash("sha256").update(verifier).digest("base64url");
@@ -65,6 +64,17 @@ async function exercise(name, call) {
   const tokens=await exchange.json();
   assert.notEqual(tokens.refresh_token,password);
   assert.notEqual(tokens.access_token,password);
+  assert.match(tokens.refresh_token,/^rt_v2_/);
+  const packed=Buffer.from(tokens.refresh_token.slice("rt_v2_".length),"base64url");
+  const key=createHash("sha256").update(JSON.stringify(["browser-control-mcp/oauth/v2",issuer,password])).digest();
+  const decipher=createDecipheriv("aes-256-gcm",key,packed.subarray(0,12));
+  decipher.setAAD(Buffer.from(issuer+":v2:rt"));
+  decipher.setAuthTag(packed.subarray(-16));
+  const decoded=JSON.parse(Buffer.concat([decipher.update(packed.subarray(12,-16)),decipher.final()]));
+  assert.deepEqual(decoded,{c:createHash("sha256").update(client_id).digest("base64url")});
+  assert(tokens.refresh_token.length < 120);
+  const reordered=createOAuth({...env,MCP_AUTH_TOKEN:"another-random-password,"+password});
+  assert.equal(await reordered.authenticate("Bearer "+tokens.access_token),1);
   assert.equal(tokens.expires_in,3600);
   const refresh={grant_type:"refresh_token",client_id,resource,refresh_token:tokens.refresh_token};
   assert.equal((await post("/oauth/token",{...refresh,refresh_token:password})).status,400);
@@ -89,7 +99,7 @@ async function exercise(name, call) {
   assert.equal(await fresh.authenticate("Bearer "+renewed.access_token),0);
   const rotated=createOAuth({...env,MCP_AUTH_TOKEN:"rotated-password"});
   assert.equal(await rotated.authenticate("Bearer "+renewed.access_token),-1);
-  assert.equal((await rotated.route(new Request(issuer+"/oauth/token",{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams(refresh)}))).status,400);
+  assert.equal((await rotated.route(new Request(issuer+"/oauth/token",{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams(refresh)}))).status,401);
   // This is an intentional stateless limitation: a valid code is replayable
   // with its verifier for the short lifetime; no false single-use guarantee.
   assert.equal((await post("/oauth/token",grant)).status,200);

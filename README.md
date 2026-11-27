@@ -179,8 +179,6 @@ Set the following environment variables on any deployment, and redeploy:
 - `MCP_AUTH_TOKEN`: the existing password. Use a long, random value.
 - `MCP_OAUTH_ISSUER`: canonical HTTPS origin of the server, without `/mcp`.
   For local testing only, HTTP loopback origins are accepted.
-- `MCP_OAUTH_SECRET`: a separate random server-only key, at least 32
-  characters (`openssl rand -hex 32`). Keep it stable across instances.
 - Optional `MCP_OAUTH_REDIRECT_URIS`: extra exact HTTPS redirect URLs.
   ChatGPT's documented connector callbacks are already allowed.
 
@@ -192,13 +190,23 @@ MCP password. Existing direct Bearer clients continue working.
 
 No Redis, KV, database, session registry or external identity provider is
 needed for OAuth, including on EdgeOne and Convex. Each invocation validates
-self-contained AES-GCM credentials against the configured issuer, scope,
-client identity and password subject. Authorization codes expire after two
+self-contained AES-256-GCM credentials using a key derived from the
+matching `MCP_AUTH_TOKEN` with SHA-256 with issuer separation. Token type,
+issuer, scope and client identity are checked after authenticated decryption. Authorization codes expire after two
 minutes; access tokens after one hour. The refresh token is reusable and has
-no fixed expiry: each refresh verifies the subject against the current
-`MCP_AUTH_TOKEN`. It is a distinct encrypted credential, not the raw password.
-Changing/removing the password invalidates its credentials; rotating the
-OAuth secret invalidates all issued client IDs and tokens.
+no fixed expiry: each refresh attempts authenticated decryption with the
+currently configured `MCP_AUTH_TOKEN` values. It is a distinct encrypted
+credential, not the raw password or its hash. Removing a password invalidates
+the access and refresh tokens encrypted under it. Client registration and
+authorization form tickets use the first configured password; removing that
+password requires re-registering affected clients. Old OAuth token formats
+issued with the separate secret are not accepted; reconnect once after upgrade.
+
+Since the password itself is the source of the encryption key, anyone who
+knows a password can create OAuth tokens for that same principal, which already
+has direct Bearer access. Captured encrypted tokens permit offline password
+guessing because the key derivation is deliberately fast; use a high-entropy random password (e.g.
+`openssl rand -hex 32`).
 
 **Private-deployment tradeoffs:** without shared state, an authorization code
 can be redeemed again with its original PKCE verifier before it expires,

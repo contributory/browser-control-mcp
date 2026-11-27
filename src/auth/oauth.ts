@@ -10,9 +10,9 @@ const defaultRedirect = "https://chatgpt.com/connector_platform_oauth_redirect";
 type Env = Record<string, string | undefined>;
 type Client = { redirect_uris: string[]; issued: number; id: string };
 type Flow = { client_id: string; redirect_uri: string; code_challenge: string; state: string; nonce: string; exp: number };
-type Refresh = { sub: string; client_id: string; resource: string; scope: string };
-type Grant = Refresh & { exp: number; redirect_uri: string; code_challenge: string };
-type Access = { sub: string; aud: string; iss: string; scope: string; exp: number };
+type Refresh = { c: string };
+type Grant = { client_id: string; resource: string; scope: string; exp: number; redirect_uri: string; code_challenge: string };
+type Access = { aud: string; iss: string; scope: string; exp: number };
 
 const now = () => Math.floor(Date.now() / 1000);
 const b64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -56,22 +56,19 @@ export function createOAuth(env: Env): OAuthServer | undefined {
   const url = new URL(env.MCP_OAUTH_ISSUER.trim());
   const loopback = url.protocol === "http:" && ["localhost","127.0.0.1","[::1]"].includes(url.hostname);
   if ((url.protocol !== "https:" && !loopback) || url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw new Error("MCP_OAUTH_ISSUER must be an HTTPS origin");
-  const secret = env.MCP_OAUTH_SECRET?.trim() ?? "";
   const passwords = list(env.MCP_AUTH_TOKEN);
-  if (secret.length < 32 || passwords.includes(secret) || !passwords.length) throw new Error("MCP_OAUTH_SECRET must be a separate 32+ character random secret");
-  return new OAuthServer(url.origin, secret, passwords, list(env.MCP_OAUTH_REDIRECT_URIS));
+  if (!passwords.length) throw new Error("MCP_AUTH_TOKEN is required");
+  return new OAuthServer(url.origin, passwords, list(env.MCP_OAUTH_REDIRECT_URIS));
 }
 
 export class OAuthServer {
   readonly resource: string;
   readonly metadata: string;
-  private readonly key: Promise<CryptoKey>;
-  private readonly subjectKey: Promise<CryptoKey>;
-  constructor(readonly issuer: string, secret: string, private readonly passwords: string[], private readonly redirects: string[]) {
+  private readonly keys = new Map<number, Promise<CryptoKey>>();
+  constructor(readonly issuer: string, private readonly passwords: string[], private readonly redirects: string[]) {
     this.resource = issuer + "/mcp";
     this.metadata = issuer + "/.well-known/oauth-protected-resource/mcp";
-    this.key = crypto.subtle.digest("SHA-256", encoder.encode("mcp-oauth/encryption/v1:" + secret)).then(bytes => crypto.subtle.importKey("raw", bytes, "AES-GCM", false, ["encrypt","decrypt"]));
-    this.subjectKey = crypto.subtle.importKey("raw", encoder.encode("mcp-oauth/subject/v1:" + secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+
   }
 
   challenge(invalid = false) {
@@ -81,35 +78,58 @@ export class OAuthServer {
   async authenticate(header: string | undefined | null): Promise<number> {
     const token = header?.match(/^Bearer (at_[A-Za-z0-9_-]+)$/i)?.[1];
     if (!token) return -1;
-    const access = await this.open<Access>("at", token);
-    if (!access || access.iss !== this.issuer || access.aud !== this.resource || access.scope !== OAUTH_SCOPE || !Number.isSafeInteger(access.exp) || access.exp <= now()) return -1;
-    return this.subjectIndex(access.sub);
+    const opened = await this.open<Access>("at", token);
+    if (!opened) return -1;
+    const access = opened.value;
+    if (access.iss !== this.issuer || access.aud !== this.resource || access.scope !== OAUTH_SCOPE || !Number.isSafeInteger(access.exp) || access.exp <= now()) return -1;
+    // The successfully authenticated encryption key identifies the principal,
+    // never an owner/index asserted inside attacker-controlled plaintext.
+    return opened.index;
   }
 
-  private async subject(password: string) {
-    return b64(new Uint8Array(await crypto.subtle.sign("HMAC", await this.subjectKey, encoder.encode(password))));
-  }
-  private async subjectIndex(sub: string) {
-    if (typeof sub !== "string") return -1;
+  private async passwordIndex(supplied: string) {
+    const candidate = await digest(supplied);
     let matched = -1;
-    for (let i = 0; i < this.passwords.length; i++) if (secureEqual(sub, await this.subject(this.passwords[i]!))) matched = i;
+    for (let i = 0; i < this.passwords.length; i++) {
+      if (secureEqual(candidate, await digest(this.passwords[i]!))) matched = i;
+    }
     return matched;
   }
-  private async seal(kind: string, value: unknown) {
+
+  /** Derive a distinct key for each configured bearer password. The public
+   * issuer separates deployments, not a second required secret.
+   * Lazy memoization within an invocation is optional; no persisted state. */
+  private key(index: number): Promise<CryptoKey> {
+    let key = this.keys.get(index);
+    if (!key) {
+      key = crypto.subtle.digest("SHA-256", encoder.encode(JSON.stringify(["browser-control-mcp/oauth/v2", this.issuer, this.passwords[index]!])))
+        .then(bytes => crypto.subtle.importKey("raw", bytes, "AES-GCM", false, ["encrypt","decrypt"]));
+      this.keys.set(index,key);
+    }
+    return key;
+  }
+
+  private async seal(kind: string, value: unknown, index = 0) {
     const iv = crypto.getRandomValues(new Uint8Array(12));
-    const bytes = new Uint8Array(await crypto.subtle.encrypt({ name:"AES-GCM", iv, additionalData:encoder.encode(this.issuer + ":" + kind) }, await this.key, encoder.encode(JSON.stringify(value))));
+    const bytes = new Uint8Array(await crypto.subtle.encrypt({ name:"AES-GCM", iv, additionalData:encoder.encode(this.issuer + ":v2:" + kind) }, await this.key(index), encoder.encode(JSON.stringify(value))));
     const packed = new Uint8Array(iv.length + bytes.length);
     packed.set(iv); packed.set(bytes, iv.length);
-    return kind + "_" + b64(packed);
+    return kind + "_v2_" + b64(packed);
   }
-  private async open<T>(kind: string, value: string): Promise<T | null> {
-    try {
-      if (!value.startsWith(kind + "_") || value.length > 16000) return null;
-      const bytes = unb64(value.slice(kind.length+1));
-      const raw = await crypto.subtle.decrypt({ name:"AES-GCM", iv:bytes.subarray(0,12), additionalData:encoder.encode(this.issuer + ":" + kind) }, await this.key, bytes.subarray(12));
-      const obj = JSON.parse(decoder.decode(raw));
-      return obj && typeof obj === "object" ? obj as T : null;
-    } catch { return null; }
+  private async open<T>(kind: string, value: string): Promise<{ value:T; index:number } | null> {
+    const prefix = kind + "_v2_";
+    if (!value.startsWith(prefix) || value.length > 16000) return null;
+    let bytes: ReturnType<typeof unb64>;
+    try { bytes = unb64(value.slice(prefix.length)); } catch { return null; }
+    if (bytes.length < 28) return null;
+    for (let index = 0; index < this.passwords.length; index++) {
+      try {
+        const raw = await crypto.subtle.decrypt({ name:"AES-GCM", iv:bytes.subarray(0,12), additionalData:encoder.encode(this.issuer + ":v2:" + kind) }, await this.key(index), bytes.subarray(12));
+        const obj = JSON.parse(decoder.decode(raw));
+        if (obj && typeof obj === "object") return {value:obj as T,index};
+      } catch { /* Wrong key or invalid authentication tag. Try the next password. */ }
+    }
+    return null;
   }
 
   private allowedRedirect(uri: string) {
@@ -121,7 +141,7 @@ export class OAuthServer {
     } catch { return false; }
   }
   private async client(id: string, redirect?: string) {
-    const c = await this.open<Client>("client", id);
+    const c = (await this.open<Client>("client", id))?.value;
     if (!c || !Array.isArray(c.redirect_uris) || !c.redirect_uris.every(x => typeof x === "string" && this.allowedRedirect(x))) return null;
     if (redirect !== undefined && !c.redirect_uris.includes(redirect)) return null;
     return c;
@@ -194,17 +214,17 @@ export class OAuthServer {
     if (raw === null) return error("invalid_request");
     const params = new URLSearchParams(raw);
     const ticket = params.get("flow") ?? "";
-    const flow = await this.open<Flow>("flow",ticket);
+    const flow = (await this.open<Flow>("flow",ticket))?.value;
     const cookie = (request.headers.get("cookie") ?? "").split(";").map(x=>x.trim()).find(x=>x.startsWith("mcp_oauth_csrf="))?.slice("mcp_oauth_csrf=".length);
     if (!flow || flow.exp <= now() || !cookie || !secureEqual(cookie,flow.nonce) || !await this.client(flow.client_id,flow.redirect_uri)) return error("invalid_request");
     if (params.get("deny") === "1") return this.redirect(flow.redirect_uri,flow.state,{error:"access_denied"});
     const supplied = params.get("password") ?? "";
-    const sub = await this.subject(supplied);
-    if (await this.subjectIndex(sub) < 0) return this.form(ticket,flow.nonce,"Incorrect auth password.",401);
-    const grant: Grant = { sub,client_id:flow.client_id,resource:this.resource,scope:OAUTH_SCOPE,exp:now()+codeTTL,redirect_uri:flow.redirect_uri,code_challenge:flow.code_challenge };
-    // Short-lived sealed code binds the password subject, client, redirect and
+    const index = await this.passwordIndex(supplied);
+    if (index < 0) return this.form(ticket,flow.nonce,"Incorrect auth password.",401);
+    const grant: Grant = { client_id:flow.client_id,resource:this.resource,scope:OAUTH_SCOPE,exp:now()+codeTTL,redirect_uri:flow.redirect_uri,code_challenge:flow.code_challenge };
+    // Short-lived sealed code binds the password key, client, redirect and
     // PKCE challenge. Without shared state it cannot be atomically consumed.
-    return this.redirect(flow.redirect_uri,flow.state,{code:await this.seal("code",grant)});
+    return this.redirect(flow.redirect_uri,flow.state,{code:await this.seal("code",grant,index)});
   }
 
   private redirect(uri: string,state: string,values: Record<string,string>) {
@@ -224,29 +244,32 @@ export class OAuthServer {
     if (p.has("resource") && p.get("resource") !== this.resource) return error("invalid_target");
     if (p.get("scope") && p.get("scope") !== OAUTH_SCOPE) return error("invalid_scope");
     const type = p.get("grant_type");
-    let grant: Refresh | null;
+    let index: number;
     let refresh: string;
     if (type === "authorization_code") {
       const code = p.get("code") ?? "";
       const verifier = p.get("code_verifier") ?? "";
       if (!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier) || !await this.client(client_id,p.get("redirect_uri")??"")) return error("invalid_grant");
-      const decoded = await this.open<Grant>("code",code);
+      const opened = await this.open<Grant>("code",code);
+      const decoded = opened?.value;
       if (!decoded || !Number.isSafeInteger(decoded.exp) || decoded.exp <= now() ||
           decoded.redirect_uri !== p.get("redirect_uri") ||
           !secureEqual(await digest(verifier),decoded.code_challenge??"")) return error("invalid_grant");
-      grant = decoded;
+      if (decoded.client_id !== client_id || decoded.resource !== this.resource || decoded.scope !== OAUTH_SCOPE) return error("invalid_grant");
+      index = opened!.index;
       refresh = "";
     } else if (type === "refresh_token") {
       refresh = p.get("refresh_token") ?? "";
-      grant = await this.open<Refresh>("rt",refresh);
+      const opened = await this.open<Refresh>("rt",refresh);
+      if (!opened || opened.value.c !== await digest(client_id)) return error("invalid_grant");
+      index = opened.index;
     } else return error("unsupported_grant_type");
-    if (!grant || grant.client_id !== client_id || grant.resource !== this.resource ||
-        grant.scope !== OAUTH_SCOPE || await this.subjectIndex(grant.sub) < 0) return error("invalid_grant");
-    const access: Access = { sub:grant.sub,aud:this.resource,iss:this.issuer,scope:OAUTH_SCOPE,exp:now()+accessTTL };
-    // Refresh remains valid while the configured password and signing secret
-    // are unchanged. Never send the actual password (also a direct MCP bearer)
-    // to an OAuth client. The encrypted password subject is checked on every use.
-    if (!refresh) refresh = await this.seal("rt",{ sub:grant.sub,client_id,resource:this.resource,scope:OAUTH_SCOPE } satisfies Refresh);
-    return json({ access_token:await this.seal("at",access),token_type:"Bearer",expires_in:accessTTL,refresh_token:refresh,scope:OAUTH_SCOPE });
+    const access: Access = { aud:this.resource,iss:this.issuer,scope:OAUTH_SCOPE,exp:now()+accessTTL };
+    // The refresh credential is encrypted with the password that authorized
+    // the grant. A successful authenticated decryption with a currently
+    // configured password proves the credential is still valid. Neither the
+    // password nor a plaintext password hash is included in its payload.
+    if (!refresh) refresh = await this.seal("rt",{ c:await digest(client_id) } satisfies Refresh,index);
+    return json({ access_token:await this.seal("at",access,index),token_type:"Bearer",expires_in:accessTTL,refresh_token:refresh,scope:OAUTH_SCOPE });
   }
 }

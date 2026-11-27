@@ -68,7 +68,6 @@ export interface AppConfig {
 /** Secrets that must never appear in output; every configured key is included. */
 const SECRET_ENV_NAMES = [
   "MCP_AUTH_TOKEN",
-  "MCP_OAUTH_SECRET",
   "BROWSER_SESSION_SECRET",
   "HYPERBROWSER_API_KEY",
   "BROWSERCLOUD_TOKEN",

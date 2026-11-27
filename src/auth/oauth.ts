@@ -200,10 +200,10 @@ export class OAuthServer {
 
   private form(ticket: string, nonce: string, message = "", status = 200) {
     const secure = this.issuer.startsWith("https:") ? "; Secure" : "";
-    return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Browser Control MCP · Authorize</title><style>body{font:16px system-ui,sans-serif;background:#f5f6f8;color:#17202c;display:grid;min-height:95vh;place-items:center;margin:0}main{background:white;padding:32px;border-radius:16px;width:min(360px,85vw);box-shadow:0 8px 30px #0001}h1{font-size:23px;margin:0 0 12px}p{line-height:1.5;color:#445}label{display:block;font-weight:600}input,button{box-sizing:border-box;width:100%;padding:12px;margin-top:8px;border-radius:8px;border:1px solid #aab}button{background:#152b44;color:white;font-weight:600;cursor:pointer}.error{color:#b42318}</style><main><h1>Connect Browser Control MCP</h1><p>Enter the MCP auth password to authorize browser control for this client.</p><p class="error" role="alert">${html(message)}</p><form method="post" action="${html(this.issuer+"/oauth/authorize")}"><input type="hidden" name="flow" value="${html(ticket)}"><label for="password">Auth password</label><input id="password" type="password" name="password" required autocomplete="current-password" maxlength="4096" autofocus><button type="submit">Authorize</button><button type="submit" name="deny" value="1" formnovalidate>Cancel</button></form></main></html>`, { status, headers:{
+    return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Browser Control MCP · Authorize</title><style>body{font:16px system-ui,sans-serif;background:#f5f6f8;color:#17202c;display:grid;min-height:95vh;place-items:center;margin:0}main{background:white;padding:32px;border-radius:16px;width:min(360px,85vw);box-shadow:0 8px 30px #0001}h1{font-size:23px;margin:0 0 12px}p{line-height:1.5;color:#445}label{display:block;font-weight:600}input,button{box-sizing:border-box;width:100%;padding:12px;margin-top:8px;border-radius:8px;border:1px solid #aab}button{background:#152b44;color:white;font-weight:600;cursor:pointer}.error{color:#b42318}</style><main><h1>Connect Browser Control MCP</h1><p>Enter the MCP auth password to authorize browser control for this client.</p><p class="error" role="alert">${html(message)}</p><form method="post" target="_self" action="${html(this.issuer+"/oauth/authorize")}"><input type="hidden" name="flow" value="${html(ticket)}"><label for="password">Auth password</label><input id="password" type="password" name="password" required autocomplete="current-password" maxlength="4096" autofocus><button type="submit">Authorize</button><button type="submit" name="deny" value="1" formnovalidate>Cancel</button></form></main></html>`, { status, headers:{
       "content-type":"text/html; charset=utf-8", "cache-control":"no-store", "pragma":"no-cache", "referrer-policy":"same-origin", "x-frame-options":"DENY", "x-content-type-options":"nosniff",
       "content-security-policy":"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
-      "set-cookie":"mcp_oauth_csrf="+nonce+"; Path=/oauth/authorize; HttpOnly; SameSite=Strict; Max-Age="+loginTTL+secure,
+      "set-cookie":"mcp_oauth_csrf_"+nonce.slice(0,16)+"="+nonce+"; Path=/oauth/authorize; HttpOnly; SameSite=Lax; Max-Age="+loginTTL+secure,
     } });
   }
 
@@ -223,15 +223,20 @@ export class OAuthServer {
     const params = new URLSearchParams(raw);
     const ticket = params.get("flow") ?? "";
     const flow = (await this.open<Flow>("flow",ticket))?.value;
-    const cookie = (request.headers.get("cookie") ?? "").split(";").map(x=>x.trim()).find(x=>x.startsWith("mcp_oauth_csrf="))?.slice("mcp_oauth_csrf=".length);
     if (!flow || flow.exp <= now() || !await this.client(flow.client_id,flow.redirect_uri)) {
       return error("invalid_request", 400, "Authorization form expired or is invalid. Restart the connection.");
     }
-    // Some OAuth popup/webview clients do not retain the cookie. A browser-
-    // supplied exact same-origin header is a valid independent CSRF defense
-    // for a POST. A missing/opaque origin alone is never sufficient.
+    const cookieName = "mcp_oauth_csrf_" + flow.nonce.slice(0,16) + "=";
+    const cookies = (request.headers.get("cookie") ?? "").split(";").map(x=>x.trim());
+    // Accept old form cookies during a rolling deployment.
+    const cookie = cookies.find(x=>x.startsWith(cookieName))?.slice(cookieName.length)
+      ?? cookies.find(x=>x.startsWith("mcp_oauth_csrf="))?.slice("mcp_oauth_csrf=".length);
+    // Browser-supplied exact same-origin Origin or Fetch Metadata is an
+    // independent CSRF defense if the webview does not preserve cookies.
+    // Opaque/missing Origin without either proof remains insufficient.
+    const sameOrigin = origin === this.issuer || request.headers.get("sec-fetch-site") === "same-origin";
     const cookieMatches = Boolean(cookie && secureEqual(cookie,flow.nonce));
-    if (!cookieMatches && (cookie || origin !== this.issuer)) {
+    if (!cookieMatches && (cookie || !sameOrigin)) {
       return error("invalid_request", 400, "Authorization form could not be verified. Reopen the login page in your browser.");
     }
     if (params.get("deny") === "1") return this.redirect(flow.redirect_uri,flow.state,{error:"access_denied"});
@@ -249,7 +254,11 @@ export class OAuthServer {
     for (const [key,value] of Object.entries(values)) url.searchParams.set(key,value);
     if (state) url.searchParams.set("state",state);
     url.searchParams.set("iss",this.issuer);
-    return new Response(null,{status:303,headers:{location:url.href,"cache-control":"no-store","referrer-policy":"no-referrer"}});
+    // The HTTP 303 is the primary redirect. Include a human-visible fallback
+    // rather than a blank response if a popup or webview does not follow it.
+    const callback = html(url.href);
+    const title = values.code ? "Authorization successful" : "Authorization cancelled";
+    return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title></head><body><main><h1>${title}</h1><p>Continue to the requesting client to complete the connection.</p><p><a href="${callback}" target="_self" rel="noreferrer">Continue to ChatGPT / OAuth client</a></p></main></body></html>`,{status:303,headers:{location:url.href,"content-type":"text/html; charset=utf-8","cache-control":"no-store","pragma":"no-cache","referrer-policy":"no-referrer","x-content-type-options":"nosniff","content-security-policy":"default-src 'none'; frame-ancestors 'none'; base-uri 'none'","x-frame-options":"DENY"}});
   }
 
   private async exchange(request: Request) {

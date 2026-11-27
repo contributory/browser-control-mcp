@@ -49,6 +49,14 @@ async function exercise(name, call) {
   const flow=page.match(/name="flow" value="([^"]+)"/)[1];
   assert.equal((await post("/oauth/authorize",{flow,password})).status,400);
   assert.equal(login.headers.get("referrer-policy"),"same-origin");
+  assert.match(login.headers.get("set-cookie"),/SameSite=Lax/);
+  assert.match(cookie,/^mcp_oauth_csrf_[A-Za-z0-9_-]{16}=/);
+  assert.equal((await post("/oauth/authorize",{flow,password:"wrong"},"form",{"sec-fetch-site":"same-origin",origin:"null"})).status,401);
+  assert.equal((await post("/oauth/authorize",{flow,password},"form",{"sec-fetch-site":"same-site"})).status,400);
+  const secondLogin=await call("/oauth/authorize?"+new URLSearchParams(authParams));
+  const secondCookie=secondLogin.headers.get("set-cookie").split(";")[0];
+  assert.notEqual(secondCookie.split("=")[0],cookie.split("=")[0]);
+  assert.equal((await post("/oauth/authorize",{flow,password:"wrong"},"form",{cookie:secondCookie+"; "+cookie,origin:"null"})).status,401);
   // OAuth browser popups may send a null origin, or omit cookies.
   // Accept only a valid matching cookie OR a browser-supplied same-origin
   // header; foreign origins and mismatched cookies must still fail.
@@ -61,7 +69,13 @@ async function exercise(name, call) {
   assert.equal((await post("/oauth/authorize",{flow,password:"wrong"},"form",{cookie,origin:issuer})).status,401);
   const approved=await post("/oauth/authorize",{flow,password},"form",{origin:issuer});
   assert.equal(approved.status,303);
+  assert.match(approved.headers.get("content-type"),/text\/html/);
+  const fallback=await approved.text();
+  assert.match(fallback,/Authorization successful/);
+  assert.match(fallback,/Continue to ChatGPT/);
   const callback=new URL(approved.headers.get("location"));
+  const fallbackUrl=fallback.match(/href="([^"]+)"/)[1].replace(/&amp;/g,"&");
+  assert.equal(fallbackUrl,callback.href);
   assert.equal(callback.origin,"https://chatgpt.com");
   assert.equal(callback.searchParams.get("state"),"test-state");
   assert.equal(callback.searchParams.get("iss"),issuer);

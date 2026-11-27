@@ -25,7 +25,7 @@ export async function handleEdgeOne(context: EdgeOneContext): Promise<Response> 
     oauthResourceMetadataPath: "/oauth/resource",
   });
   const headers = new Headers(response.headers);
-  headers.set("X-MCP-Adapter", "edgeone-oauth-discovery-v2");
+  headers.set("X-MCP-Adapter", "edgeone-oauth-discovery-v3");
   headers.set("X-MCP-OAuth", env.MCP_OAUTH_ISSUER ? "configured" : "disabled");
   return new Response(response.body === null ? null : await response.text(), { status: response.status, headers });
 }

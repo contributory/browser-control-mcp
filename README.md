@@ -232,7 +232,7 @@ aliases. Check `GET /mcp` for the resource metadata challenge,
 `GET /oauth/resource` for the protected resource JSON, and
 `GET /.well-known/oauth-authorization-server` for authorization metadata.
 All three must refer to the same canonical HTTPS issuer. The
-`X-MCP-Adapter: edgeone-oauth-discovery-v2` and `X-MCP-OAuth` response headers
+`X-MCP-Adapter: edgeone-oauth-discovery-v3` and `X-MCP-OAuth` response headers
 identify the updated adapter and whether an issuer is configured without
 revealing any credentials. If the adapter header is absent, check the
 production deployment commit and build logs before debugging OAuth.
@@ -241,3 +241,8 @@ The OAuth password form accepts a valid CSRF cookie even if the user agent
 reports an opaque (null) origin. For browsers that omit cookies, an exact
 same-origin POST is also supported. Foreign origins, cross-site form
 submissions, invalid cookies, and expired encrypted flow tickets are rejected.
+
+Authorization popups use independent CSRF cookies so concurrent flows do not
+overwrite each other. Successful or cancelled authorization sends HTTP 303
+to the validated callback, with an HTML continuation link as a fallback
+for webviews that display the redirect response instead of following it.

@@ -92,6 +92,7 @@ Playwright tools work with every verified Playwright/CDP provider:
 | `playwright_snapshot` | Size-limited page text, or HTML when no text. |
 | `playwright_click`, `playwright_fill`, `playwright_press` | Ordinary interactions with timeouts; form values are never echoed. |
 | `playwright_screenshot` | JPEG within `BROWSER_MAX_IMAGE_BYTES`. |
+| `playwright_run` | One-call browser workflow: open, bounded actions, final snapshot, close. |
 | `playwright_act` | Bounded sequence of the interactions above plus `wait_for_selector`, `scroll_into_view`, `wait`. No JavaScript or CDP. |
 | `playwright_evaluate` | Privileged, disabled by default. |
 | `playwright_console`, `playwright_network` | Bounded read-only buffers with dropped counters and TTL. |

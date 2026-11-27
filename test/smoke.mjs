@@ -203,6 +203,7 @@ try {
     "playwright_press",
     "playwright_screenshot",
     "playwright_act",
+    "playwright_run",
     "playwright_evaluate",
     "playwright_console",
     "playwright_network",

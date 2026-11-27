@@ -7,4 +7,6 @@ export interface AppContext {
   config: AppConfig;
   providers: Providers;
   sessions: SessionRegistry;
+  /** Serverless invocations cannot guarantee persistent browser connections. */
+  sessionMode?: "persistent" | "request";
 }

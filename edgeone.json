@@ -1,0 +1,14 @@
+{
+  "installCommand": "npm ci",
+  "buildCommand": "npm run build:edgeone",
+  "outputDirectory": "public",
+  "nodeVersion": "22.17.1",
+  "cloudFunctions": {
+    "nodejs": {
+      "externalNodeModules": [
+        "playwright-core"
+      ],
+      "maxDuration": 60
+    }
+  }
+}

@@ -25,7 +25,7 @@ node --env-file=.env dist/index.js
 
 Set your MCP client transport to Streamable HTTP, its URL to `http://127.0.0.1:3000/mcp`, and its `Authorization` header to `Bearer <your MCP_AUTH_TOKEN>`. Send this header on every request. If your host injects the environment variables directly, start the server with `npm start`. Keep `.env` and provider credentials out of source control.
 
-Start with `playwright_list_services` to see which Playwright services are configured. Discovery reads server configuration and returns service names. Pass a name to `playwright_open` to choose a service, or omit it to randomly select a configured and allowed Hyperbrowser or BrowserCloud service. If neither is available, the server randomly selects a configured and allowed custom CDP service. Pass the returned `browser_id` to subsequent browser tools, and call `playwright_close` to release the session. PhantomJSCloud is discovered through the client’s MCP tool list.
+Start with `playwright_list_services` to see which Playwright services are configured. Discovery reads server configuration and returns service names. Pass a name to `playwright_open` to choose a service, or omit it to randomly select a configured and allowed Hyperbrowser or BrowserCloud service. If neither is available, the server randomly selects a configured and allowed custom CDP service. Pass the returned `browser_id` to subsequent browser tools, and call `playwright_close` to release the session. Alternatively, `playwright_run` opens, performs actions, snapshots and closes in one call. PhantomJSCloud is discovered through the client’s MCP tool list.
 
 ## Stateless MCP transport
 
@@ -91,12 +91,53 @@ The server disconnects from the endpoint when its MCP browser session closes. Th
 
 Run `npm run check` for TypeScript checks and `npm run build` to compile the server. The architecture and provider contracts are described in the [design document](docs/design.md). See the [repository guide](AGENTS.md) for the project layout.
 
-## EdgeOne and Convex
+## EdgeOne Pages (native Cloud Functions)
 
-The EdgeOne and Convex adapters expose the same stateless `/mcp` endpoint through a gateway. Run the standalone Node server as a persistent backend reachable over HTTPS, then set `MCP_BACKEND_URL` on the gateway to its full URL, such as `https://backend.example.com/mcp`. Configure `MCP_AUTH_TOKEN`, provider keys, destination policy, and allowed client origins on the backend. Clients send the same bearer token to the gateway, which forwards it to the backend.
+Deploy the repository to EdgeOne Pages using the root directory. The checked-in
+`edgeone.json` selects `npm ci`, `npm run build:edgeone`, and the dedicated
+`public/` static directory. The build copies the compiled private modules into
+`cloud-functions/_runtime/`. The route `cloud-functions/mcp.js` handles
+`/mcp` directly in EdgeOne's Node.js Cloud Functions runtime; there is no
+MCP upstream URL or separate server. Configure `MCP_AUTH_TOKEN`, provider
+credentials and other access settings in the project's environment variables.
+Redeploy after changing them. Never put secrets in the static directory.
 
-Deploy `edge-functions/mcp.js` with EdgeOne Pages and set `MCP_BACKEND_URL` in its environment. For Convex, deploy `convex/http.ts` with the Convex CLI and set `MCP_BACKEND_URL` in the Convex deployment environment. The resulting endpoint uses the deployment's `.convex.site` domain.
+The [Node.js Cloud Functions documentation](https://pages.edgeone.ai/document/node-functions)
+describes the Request/Response handler and file-based routing. The
+[Cloud Functions limits](https://pages.edgeone.ai/document/cloud-functions)
+specify Node.js 20.x, a 6 MB request/response limit, and a default 30-second
+execution limit (subject to plan). Set provider and operation timeouts within
+your deployment's actual deadline. Only finite JSON MCP responses are used;
+GET SSE and DELETE are not supported.
 
-The gateway does not host Playwright or retain browser connections. All requests for a browser session must reach the same persistent backend process. The adapters depend on the platform's HTTP request, response, and size limits. Validate the deployed endpoint with your provider and account before production use.
+EdgeOne and Convex use a request-scoped browser registry, with no listener,
+background sweeper, or dependency on an external MCP server. They expose
+`playwright_list_services`, `playwright_run` and the PhantomJSCloud tools.
+`playwright_run` opens a browser, performs bounded actions, returns a final
+text snapshot (and optional JPEG), and closes it within the same invocation.
+Cross-request browser IDs and continuous diagnostics are not advertised in
+this mode. Provider-side session expiry remains important if an invocation
+is killed. Concurrent quotas are not globally shared across cloud instances.
 
-Run `node test/proxy.mjs` to check request forwarding locally.
+Run `npm run build:edgeone && npm run smoke:edgeone` to test the native handler
+without external credentials. Validate live browser connections and platform
+limits on your deployment before production use.
+
+## Convex (native HTTP Actions)
+
+Deploy with `npx convex deploy` and configure the same environment variables
+in Convex (for example `npx convex env set MCP_AUTH_TOKEN ...`). The endpoint is
+`https://<deployment>.convex.site/mcp`. No separate server URL is needed.
+
+`convex/http.ts` registers the HTTP endpoint, enforces access policy and body
+limits, and calls `convex/mcpNode.ts` through Convex's internal action mechanism.
+The internal Node action runs the same MCP handler and browser/provider code
+as EdgeOne. This is necessary because Convex HTTP Actions do not support Node
+APIs directly. See [HTTP Actions](https://docs.convex.dev/functions/http-actions)
+and [Runtimes](https://docs.convex.dev/functions/runtimes). Neither adapter binds
+a port or starts an HTTP server. Run `npm run check:convex && npm run smoke:convex`
+for the local type and handler tests.
+
+The standalone `npm start` mode is unchanged and continues to expose the full
+persistent browser-session and diagnostic tool set. Both serverless adapters
+use the one-call workflow described above.

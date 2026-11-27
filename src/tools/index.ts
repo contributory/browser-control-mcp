@@ -11,6 +11,6 @@ import { registerPlaywrightTools } from "./playwright.js";
  */
 export function registerTools(mcp: McpServer, ctx: AppContext, principal: string): void {
   registerPlaywrightTools(mcp, ctx, principal);
-  registerDiagnosticTools(mcp, ctx, principal);
+  if (ctx.sessionMode !== "request") registerDiagnosticTools(mcp, ctx, principal);
   registerPhantomJsCloudTools(mcp, ctx, principal);
 }

@@ -1,10 +1,10 @@
 import { SessionRegistry } from "../browser/sessions.js";
 import { loadConfig } from "../config.js";
 import { createProviders } from "../providers/index.js";
-import { createWebHandler } from "./web.js";
+import { createWebHandler, type WebHandlerOptions } from "./web.js";
 
 /** A complete MCP invocation, including cleanup, without a listener or timers. */
-export async function handleServerless(request: Request, env: NodeJS.ProcessEnv): Promise<Response> {
+export async function handleServerless(request: Request, env: NodeJS.ProcessEnv, options: WebHandlerOptions = {}): Promise<Response> {
   let config;
   let providers;
   try {
@@ -18,7 +18,7 @@ export async function handleServerless(request: Request, env: NodeJS.ProcessEnv)
   }
   const sessions = new SessionRegistry(config, providers);
   try {
-    return await createWebHandler({ config, providers, sessions, sessionMode: "request" })(request);
+    return await createWebHandler({ config, providers, sessions, sessionMode: "request" }, options)(request);
   } finally {
     await sessions.closeAll();
   }

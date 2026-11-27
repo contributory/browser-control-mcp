@@ -108,7 +108,10 @@ describes the Request/Response handler and file-based routing. The
 specify Node.js 20.x, a 6 MB request/response limit, and a default 30-second
 execution limit (subject to plan). Set provider and operation timeouts within
 your deployment's actual deadline. Only finite JSON MCP responses are used;
-GET SSE and DELETE are not supported.
+GET SSE and DELETE are not supported. The EdgeOne handler reads JSON using
+the platform's native Request accessor, enforces byte limits, and supplies
+the parsed body to the MCP SDK rather than assuming its body is a standard
+ReadableStream.
 
 EdgeOne and Convex use a request-scoped browser registry, with no listener,
 background sweeper, or dependency on an external MCP server. They expose

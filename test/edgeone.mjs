@@ -11,7 +11,19 @@ const env = {
   BROWSER_ALLOWED_SERVICES: "no-provider",
   MCP_MAX_REQUEST_BYTES: "1024",
 };
-const call = (init = {}, target = url) => onRequest({ request: new Request(target, init), env });
+// Model the Cloud Functions Request: native text() works even when body is
+// not a WHATWG ReadableStream. Fails against the original SDK stream path.
+function platformRequest(input, init) {
+  const request = new Request(input, init);
+  return {
+    url: request.url,
+    method: request.method,
+    headers: request.headers,
+    text: () => request.text(),
+    get body() { throw new Error("Platform request body is not a WHATWG stream"); },
+  };
+}
+const call = (init = {}, target = url) => onRequest({ request: platformRequest(target, init), env });
 const auth = { authorization: "Bearer " + token };
 assert.equal((await call()).status, 401);
 assert.equal((await call({ headers: { authorization: "Bearer wrong" } })).status, 401);
@@ -24,11 +36,15 @@ assert.equal((await call({ headers: auth }, new URL("https://cloud.example/nope"
 const postHeaders = { ...auth, accept: "application/json, text/event-stream", "content-type": "application/json" };
 assert.equal((await call({ method: "POST", headers: postHeaders, body: "x".repeat(1025) })).status, 413);
 assert.equal((await call({ method: "POST", headers: postHeaders, body: "{" })).status, 400);
+assert.equal((await call({ method: "POST", headers: postHeaders, body: '"é'.repeat(600) })).status, 413);
+assert.equal((await call({ method: "POST", headers: { ...postHeaders, "content-length": "1025" }, body: "{}" })).status, 413);
+assert.equal((await call({ method: "POST", headers: { ...postHeaders, accept: "text/plain" }, body: "{}" })).status, 406);
+assert.equal((await call({ method: "POST", headers: { ...postHeaders, "content-type": "text/plain" }, body: "{}" })).status, 415);
 
 const client = new Client({ name: "edgeone-smoke", version: "1.0.0" });
 const transport = new StreamableHTTPClientTransport(url, {
   requestInit: { headers: auth },
-  fetch: (input, init) => onRequest({ request: new Request(input, init), env }),
+  fetch: (input, init) => onRequest({ request: platformRequest(input, init), env }),
 });
 try {
   await client.connect(transport);

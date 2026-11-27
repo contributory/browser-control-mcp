@@ -178,7 +178,10 @@ Set the following environment variables on any deployment, and redeploy:
 
 - `MCP_AUTH_TOKEN`: the existing password. Use a long, random value.
 - `MCP_OAUTH_ISSUER`: canonical HTTPS origin of the server, without `/mcp`.
-  For local testing only, HTTP loopback origins are accepted.
+  For local testing only, HTTP loopback origins are accepted. The existing
+  `https://browser-control-mcp.edgeone.dev` deployment has this exact origin
+  as its default; other EdgeOne hosts must set the issuer explicitly.
+  Set `MCP_OAUTH_ENABLED=false` on EdgeOne to disable OAuth even on the default host.
 - Optional `MCP_OAUTH_REDIRECT_URIS`: extra exact HTTPS redirect URLs.
   ChatGPT's documented connector callbacks are already allowed.
 
@@ -220,3 +223,16 @@ documentation](https://developers.openai.com/plugins/build/auth).
 Run `npm run build:edgeone && node test/oauth.mjs` for the local end-to-end
 OAuth tests on standalone, serverless and bundled Convex handlers. Test
 well-known route rewrites and the actual ChatGPT connection after deployment.
+
+### EdgeOne OAuth discovery troubleshooting
+
+The EdgeOne adapter advertises the direct `/oauth/resource` function URL in
+its 401 challenge and provides both native well-known routes and rewrite
+aliases. Check `GET /mcp` for the resource metadata challenge,
+`GET /oauth/resource` for the protected resource JSON, and
+`GET /.well-known/oauth-authorization-server` for authorization metadata.
+All three must refer to the same canonical HTTPS issuer. The
+`X-MCP-Adapter: edgeone-oauth-discovery-v1` and `X-MCP-OAuth` response headers
+identify the updated adapter and whether an issuer is configured without
+revealing any credentials. If the adapter header is absent, check the
+production deployment commit and build logs before debugging OAuth.

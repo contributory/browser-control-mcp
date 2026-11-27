@@ -9,11 +9,11 @@ export async function handleServerless(request: Request, env: NodeJS.ProcessEnv,
   const path = new URL(request.url).pathname;
   let oauth = options.oauth;
   if (!options.oauthHandledUpstream) {
-    try { oauth ??= createOAuth(env); }
+    try { oauth ??= createOAuth(env, options.oauthResourceMetadataPath); }
     catch { return new Response("OAuth configuration is invalid", { status: 503, headers: { "Cache-Control": "no-store" } }); }
   }
   if (isOAuthPath(path)) {
-    return oauth ? oauth.route(request) : new Response(null, { status: 404 });
+    return oauth ? oauth.route(request) : new Response("OAuth is not enabled", { status: 404, headers: { "Cache-Control": "no-store" } });
   }
   let config;
   let providers;

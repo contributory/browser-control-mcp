@@ -68,3 +68,38 @@ try {
 } finally {
   await client.close();
 }
+
+// Existing production origin has a pinned default issuer, independent of the
+// dashboard's optional issuer setting. Arbitrary domains do not get one.
+const production = "https://browser-control-mcp.edgeone.dev";
+const prodEnv = { ...env, MCP_OAUTH_ISSUER: "" };
+const prodRequest = (path, init) => ({ request: platformRequest(production + path, init), env: prodEnv });
+const challenge = await onRequest(prodRequest("/mcp"));
+assert.equal(challenge.status, 401);
+assert.equal(challenge.headers.get("x-mcp-adapter"), "edgeone-oauth-discovery-v1");
+assert.equal(challenge.headers.get("x-mcp-oauth"), "configured");
+assert.match(challenge.headers.get("www-authenticate"), /resource_metadata="https:\/\/browser-control-mcp\.edgeone\.dev\/oauth\/resource"/);
+const { default: resourceRoute } = await import("../cloud-functions/oauth/resource.js");
+const { default: metadataRoute } = await import("../cloud-functions/oauth/metadata.js");
+const { default: directResource } = await import("../cloud-functions/.well-known/oauth-protected-resource/index.js");
+const { default: directResourceMcp } = await import("../cloud-functions/.well-known/oauth-protected-resource/mcp.js");
+const { default: directMetadata } = await import("../cloud-functions/.well-known/oauth-authorization-server.js");
+for (const [handler, path] of [[resourceRoute,"/oauth/resource"],[resourceRoute,"/.well-known/oauth-protected-resource/mcp"],[directResource,"/.well-known/oauth-protected-resource"],[directResourceMcp,"/.well-known/oauth-protected-resource/mcp"]]) {
+  const response = await handler(prodRequest(path));
+  assert.equal(response.status,200);
+  const body = await response.json();
+  assert.equal(body.resource,production+"/mcp");
+  assert.deepEqual(body.authorization_servers,[production]);
+}
+for (const [handler,path] of [[metadataRoute,"/oauth/metadata"],[metadataRoute,"/.well-known/oauth-authorization-server"],[directMetadata,"/.well-known/oauth-authorization-server"]]) {
+  const response = await handler(prodRequest(path));
+  assert.equal(response.status,200);
+  const body = await response.json();
+  assert.equal(body.issuer,production);
+  assert.deepEqual(body.code_challenge_methods_supported,["S256"]);
+}
+const disabled = await onRequest({ ...prodRequest("/mcp"), env: { ...prodEnv, MCP_OAUTH_ENABLED:"false" } });
+assert.equal(disabled.headers.get("www-authenticate"),"Bearer");
+const custom = await onRequest({ request:platformRequest("https://custom.example/mcp"),env:{...prodEnv,MCP_OAUTH_ISSUER:"https://custom.example"} });
+assert.match(custom.headers.get("www-authenticate"),/https:\/\/custom\.example\/oauth\/resource/);
+console.log("PASS: production OAuth discovery, direct function and rewrite routes, pinned issuer, custom issuer and disable switch.");

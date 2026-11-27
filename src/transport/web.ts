@@ -8,6 +8,7 @@ import { registerTools } from "../tools/index.js";
 export interface WebHandlerOptions {
   /** EdgeOne's Request body is not guaranteed to be a WHATWG ReadableStream. */
   nativeBodyReader?: boolean;
+  oauthResourceMetadataPath?: string;
   oauth?: OAuthServer;
   /** Convex HTTP action has already verified OAuth and passed only the credential index. */
   oauthHandledUpstream?: boolean;

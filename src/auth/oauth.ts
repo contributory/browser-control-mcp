@@ -51,23 +51,23 @@ export function isOAuthPath(path: string) {
 /** Stateless private-deployment OAuth: all credentials are self-contained.
  * No database, process-local registry or external OAuth provider is required.
  */
-export function createOAuth(env: Env): OAuthServer | undefined {
+export function createOAuth(env: Env, metadataPath = "/.well-known/oauth-protected-resource/mcp"): OAuthServer | undefined {
   if (!env.MCP_OAUTH_ISSUER?.trim()) return undefined;
   const url = new URL(env.MCP_OAUTH_ISSUER.trim());
   const loopback = url.protocol === "http:" && ["localhost","127.0.0.1","[::1]"].includes(url.hostname);
   if ((url.protocol !== "https:" && !loopback) || url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw new Error("MCP_OAUTH_ISSUER must be an HTTPS origin");
   const passwords = list(env.MCP_AUTH_TOKEN);
   if (!passwords.length) throw new Error("MCP_AUTH_TOKEN is required");
-  return new OAuthServer(url.origin, passwords, list(env.MCP_OAUTH_REDIRECT_URIS));
+  return new OAuthServer(url.origin, passwords, list(env.MCP_OAUTH_REDIRECT_URIS), metadataPath);
 }
 
 export class OAuthServer {
   readonly resource: string;
   readonly metadata: string;
   private readonly keys = new Map<number, Promise<CryptoKey>>();
-  constructor(readonly issuer: string, private readonly passwords: string[], private readonly redirects: string[]) {
+  constructor(readonly issuer: string, private readonly passwords: string[], private readonly redirects: string[], metadataPath = "/.well-known/oauth-protected-resource/mcp") {
     this.resource = issuer + "/mcp";
-    this.metadata = issuer + "/.well-known/oauth-protected-resource/mcp";
+    this.metadata = issuer + metadataPath;
 
   }
 

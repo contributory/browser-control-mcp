@@ -1,5 +1,5 @@
-import { handleServerless } from "../_runtime/transport/serverless.js";
+import { handleEdgeOne } from "../_runtime/transport/edgeone.js";
 
 export default function onRequest(context) {
-  return handleServerless(context.request, { ...process.env, ...context.env }, { nativeBodyReader: true });
+  return handleEdgeOne(context);
 }

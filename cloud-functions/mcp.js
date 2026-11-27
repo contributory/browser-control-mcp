@@ -1,6 +1,5 @@
-import { handleServerless } from "./_runtime/transport/serverless.js";
+import { handleEdgeOne } from "./_runtime/transport/edgeone.js";
 
-// EdgeOne owns the HTTP listener. No persistent browser connection is assumed.
 export default function onRequest(context) {
-  return handleServerless(context.request, { ...process.env, ...context.env }, { nativeBodyReader: true });
+  return handleEdgeOne(context);
 }

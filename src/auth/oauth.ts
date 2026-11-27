@@ -40,7 +40,7 @@ function json(value: unknown, status = 200, extra: HeadersInit = {}) {
   headers.set("x-content-type-options", "nosniff");
   return new Response(JSON.stringify(value), { status, headers });
 }
-function error(code: string, status = 400) { return json({ error: code }, status); }
+function error(code: string, status = 400, description?: string) { return json({ error: code, ...(description ? { error_description: description } : {}) }, status); }
 
 export function isOAuthPath(path: string) {
   return ["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp",
@@ -187,7 +187,7 @@ export class OAuthServer {
     const redirect_uri = params.get("redirect_uri") ?? "";
     if (!await this.client(client_id, redirect_uri)) return error("invalid_client");
     const state = params.get("state") ?? "";
-    if (state.length > 1024) return error("invalid_request");
+    if (state.length > 4096) return error("invalid_request", 400, "Authorization state exceeds the supported size.");
     const reject = (code: string) => this.redirect(redirect_uri, state, { error:code });
     if (params.get("response_type") !== "code") return reject("unsupported_response_type");
     if (params.get("scope") && params.get("scope") !== OAUTH_SCOPE) return reject("invalid_scope");
@@ -201,7 +201,7 @@ export class OAuthServer {
   private form(ticket: string, nonce: string, message = "", status = 200) {
     const secure = this.issuer.startsWith("https:") ? "; Secure" : "";
     return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Browser Control MCP · Authorize</title><style>body{font:16px system-ui,sans-serif;background:#f5f6f8;color:#17202c;display:grid;min-height:95vh;place-items:center;margin:0}main{background:white;padding:32px;border-radius:16px;width:min(360px,85vw);box-shadow:0 8px 30px #0001}h1{font-size:23px;margin:0 0 12px}p{line-height:1.5;color:#445}label{display:block;font-weight:600}input,button{box-sizing:border-box;width:100%;padding:12px;margin-top:8px;border-radius:8px;border:1px solid #aab}button{background:#152b44;color:white;font-weight:600;cursor:pointer}.error{color:#b42318}</style><main><h1>Connect Browser Control MCP</h1><p>Enter the MCP auth password to authorize browser control for this client.</p><p class="error" role="alert">${html(message)}</p><form method="post" action="${html(this.issuer+"/oauth/authorize")}"><input type="hidden" name="flow" value="${html(ticket)}"><label for="password">Auth password</label><input id="password" type="password" name="password" required autocomplete="current-password" maxlength="4096" autofocus><button type="submit">Authorize</button><button type="submit" name="deny" value="1" formnovalidate>Cancel</button></form></main></html>`, { status, headers:{
-      "content-type":"text/html; charset=utf-8", "cache-control":"no-store", "pragma":"no-cache", "referrer-policy":"no-referrer", "x-frame-options":"DENY", "x-content-type-options":"nosniff",
+      "content-type":"text/html; charset=utf-8", "cache-control":"no-store", "pragma":"no-cache", "referrer-policy":"same-origin", "x-frame-options":"DENY", "x-content-type-options":"nosniff",
       "content-security-policy":"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
       "set-cookie":"mcp_oauth_csrf="+nonce+"; Path=/oauth/authorize; HttpOnly; SameSite=Strict; Max-Age="+loginTTL+secure,
     } });
@@ -209,14 +209,31 @@ export class OAuthServer {
 
   private async login(request: Request) {
     const origin = request.headers.get("origin");
-    if (origin && origin !== this.issuer) return error("invalid_request");
+    // Browsers can send Origin: null after a no-referrer navigation or from
+    // a privacy-preserving webview. A valid same-site CSRF cookie still
+    // authenticates the form in that case. Reject explicit foreign origins.
+    if (origin && origin !== "null" && origin !== this.issuer) {
+      return error("invalid_request", 400, "Authorization form must be submitted from the OAuth server.");
+    }
+    if (request.headers.get("sec-fetch-site") === "cross-site") {
+      return error("invalid_request", 400, "Cross-site authorization form submission is not allowed.");
+    }
     const raw = await this.body(request, "application/x-www-form-urlencoded");
-    if (raw === null) return error("invalid_request");
+    if (raw === null) return error("invalid_request", 400, "Expected a URL-encoded authorization form.");
     const params = new URLSearchParams(raw);
     const ticket = params.get("flow") ?? "";
     const flow = (await this.open<Flow>("flow",ticket))?.value;
     const cookie = (request.headers.get("cookie") ?? "").split(";").map(x=>x.trim()).find(x=>x.startsWith("mcp_oauth_csrf="))?.slice("mcp_oauth_csrf=".length);
-    if (!flow || flow.exp <= now() || !cookie || !secureEqual(cookie,flow.nonce) || !await this.client(flow.client_id,flow.redirect_uri)) return error("invalid_request");
+    if (!flow || flow.exp <= now() || !await this.client(flow.client_id,flow.redirect_uri)) {
+      return error("invalid_request", 400, "Authorization form expired or is invalid. Restart the connection.");
+    }
+    // Some OAuth popup/webview clients do not retain the cookie. A browser-
+    // supplied exact same-origin header is a valid independent CSRF defense
+    // for a POST. A missing/opaque origin alone is never sufficient.
+    const cookieMatches = Boolean(cookie && secureEqual(cookie,flow.nonce));
+    if (!cookieMatches && (cookie || origin !== this.issuer)) {
+      return error("invalid_request", 400, "Authorization form could not be verified. Reopen the login page in your browser.");
+    }
     if (params.get("deny") === "1") return this.redirect(flow.redirect_uri,flow.state,{error:"access_denied"});
     const supplied = params.get("password") ?? "";
     const index = await this.passwordIndex(supplied);

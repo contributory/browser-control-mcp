@@ -48,8 +48,18 @@ async function exercise(name, call) {
   assert.match(page,/type="password"/);
   const flow=page.match(/name="flow" value="([^"]+)"/)[1];
   assert.equal((await post("/oauth/authorize",{flow,password})).status,400);
+  assert.equal(login.headers.get("referrer-policy"),"same-origin");
+  // OAuth browser popups may send a null origin, or omit cookies.
+  // Accept only a valid matching cookie OR a browser-supplied same-origin
+  // header; foreign origins and mismatched cookies must still fail.
+  assert.equal((await post("/oauth/authorize",{flow,password:"wrong"},"form",{cookie,origin:"null"})).status,401);
+  assert.equal((await post("/oauth/authorize",{flow,password:"wrong"},"form",{origin:issuer})).status,401);
+  assert.equal((await post("/oauth/authorize",{flow,password},"form",{origin:"null"})).status,400);
+  assert.equal((await post("/oauth/authorize",{flow,password},"form",{cookie,origin:"https://evil.example"})).status,400);
+  assert.equal((await post("/oauth/authorize",{flow,password},"form",{cookie:"mcp_oauth_csrf=wrong",origin:issuer})).status,400);
+  assert.equal((await post("/oauth/authorize",{flow,password},"form",{cookie,origin:issuer,"sec-fetch-site":"cross-site"})).status,400);
   assert.equal((await post("/oauth/authorize",{flow,password:"wrong"},"form",{cookie,origin:issuer})).status,401);
-  const approved=await post("/oauth/authorize",{flow,password},"form",{cookie,origin:issuer});
+  const approved=await post("/oauth/authorize",{flow,password},"form",{origin:issuer});
   assert.equal(approved.status,303);
   const callback=new URL(approved.headers.get("location"));
   assert.equal(callback.origin,"https://chatgpt.com");

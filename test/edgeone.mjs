@@ -76,7 +76,7 @@ const prodEnv = { ...env, MCP_OAUTH_ISSUER: "" };
 const prodRequest = (path, init) => ({ request: platformRequest(production + path, init), env: prodEnv });
 const challenge = await onRequest(prodRequest("/mcp"));
 assert.equal(challenge.status, 401);
-assert.equal(challenge.headers.get("x-mcp-adapter"), "edgeone-oauth-discovery-v1");
+assert.equal(challenge.headers.get("x-mcp-adapter"), "edgeone-oauth-discovery-v2");
 assert.equal(challenge.headers.get("x-mcp-oauth"), "configured");
 assert.match(challenge.headers.get("www-authenticate"), /resource_metadata="https:\/\/browser-control-mcp\.edgeone\.dev\/oauth\/resource"/);
 const { default: resourceRoute } = await import("../cloud-functions/oauth/resource.js");

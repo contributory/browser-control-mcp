@@ -113,14 +113,40 @@ the platform's native Request accessor, enforces byte limits, and supplies
 the parsed body to the MCP SDK rather than assuming its body is a standard
 ReadableStream.
 
-EdgeOne and Convex use a request-scoped browser registry, with no listener,
-background sweeper, or dependency on an external MCP server. They expose
-`playwright_list_services`, `playwright_run` and the PhantomJSCloud tools.
-`playwright_run` opens a browser, performs bounded actions, returns a final
-text snapshot (and optional JPEG), and closes it within the same invocation.
-Cross-request browser IDs and continuous diagnostics are not advertised in
-this mode. Provider-side session expiry remains important if an invocation
-is killed. Concurrent quotas are not globally shared across cloud instances.
+EdgeOne and Convex use a provider-managed session registry, with no listener,
+background sweeper, database or external MCP server. Hyperbrowser retains
+the remote browser using `keepAlive=true` (see [provider lifecycle docs](https://docs.hyperbrowser.ai/browser-sessions/lifecycle)).
+`playwright_open` creates a remote browser and returns an encrypted,
+authenticated browser ID bound to the caller. Subsequent tools resolve the
+same session via the provider API, reconnect Playwright, and disconnect after
+the operation. `playwright_close` explicitly stops the provider session.
+Only the provider ID, owner and fixed expiry are encoded, never the endpoint
+or provider credential. By default the handle key is derived from the
+server-only Hyperbrowser API key; optionally set `BROWSER_SESSION_SECRET`
+to a separate random secret (32+ random bytes), consistent across instances.
+Do not use the client bearer token. Changing the encryption secret invalidates
+existing IDs; provider-side expiry still cleans up those sessions.
+
+Use `playwright_list_services` to distinguish reconnectable providers from
+one-call workflow providers. Hyperbrowser supports both. BrowserCloud and
+custom CDP endpoints continue to support `playwright_run` on cloud platforms
+and persistent sessions on standalone Node.js. Reconnect is not assumed for
+arbitrary custom CDP endpoints, which lack a verified creation/release contract.
+The cloud endpoint exposes ordinary individual tools, action sequences,
+evaluation and read-only CDP commands (subject to their existing privilege
+flags). Continuous console/network/CDP event subscriptions remain available
+only on standalone Node.js.
+
+The stateless handle has a fixed lifetime (up to 45 minutes, rounded down to
+the provider's minute granularity) enforced by the provider and the server.
+There is no sliding idle expiration, distributed lock or exact per-owner
+quota without shared state. Serialize calls per browser ID at the client.
+The provider's account-wide active count is checked against the smaller of
+the configured session caps before each reconnectable allocation; this is
+a conservative admission check, not an atomic reservation. Use provider-side
+hard quotas to bound concurrent allocations. One-call workflows retain their
+request-local quotas. A deployment terminated mid-request relies on the
+provider's expiry for cleanup.
 
 Run `npm run build:edgeone && npm run smoke:edgeone` to test the native handler
 without external credentials. Validate live browser connections and platform
@@ -143,4 +169,4 @@ for the local type and handler tests.
 
 The standalone `npm start` mode is unchanged and continues to expose the full
 persistent browser-session and diagnostic tool set. Both serverless adapters
-use the one-call workflow described above.
+use the shared provider-managed registry and one-call workflow described above.

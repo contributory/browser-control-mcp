@@ -74,3 +74,16 @@ Unit-test adapters with mock SDKs, including cleanup after create or connect fai
 - BrowserCloud: https://browsercloud.io/docs/launch-options
 - PhantomJSCloud: https://phantomjscloud.com/docs/http-api/ (Standard JSON API) and https://phantomjscloud.com/docs/http-api/automation/index.html
 - Playwright: https://github.com/microsoft/playwright/blob/main/docs/src/api/class-browsertype.md
+
+## Provider-managed cloud sessions
+
+Cloud Functions and Convex Node actions share the session contract with the
+standalone in-memory registry. Hyperbrowser supports detached browser sessions
+via the [session lifecycle](https://docs.hyperbrowser.ai/browser-sessions/lifecycle)
+and SDK session get/stop operations. A confidential AES-GCM browser handle
+contains the provider session identifier, owner and fixed expiration. The
+handle key is independent of client authentication tokens. Reconnect uses the
+provider API rather than accepting a client-supplied endpoint. The provider
+maintains page state and enforces a hard lifetime; the MCP invocation opens and
+disposes only its local Playwright connection. See README for the limitations
+of stateless admission checks, idle timeout, and event subscriptions.

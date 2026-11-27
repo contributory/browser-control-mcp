@@ -50,12 +50,15 @@ try {
   await client.connect(transport);
   assert.equal(transport.sessionId, undefined);
   const { tools } = await client.listTools();
-  assert(!tools.some(tool => tool.name === "playwright_open"));
+  assert(tools.some(tool => tool.name === "playwright_open"));
+  assert(tools.some(tool => tool.name === "playwright_cdp_send"));
+  assert(!tools.some(tool => tool.name === "playwright_console"));
+  assert.equal(tools.length, 15);
   assert(tools.some(tool => tool.name === "playwright_run"));
   assert(tools.some(tool => tool.name === "phantomjscloud_render"));
   const services = await client.callTool({ name: "playwright_list_services", arguments: {} });
   assert.deepEqual(services.structuredContent.services, []);
-  assert.equal(services.structuredContent.session_mode, "request");
+  assert.equal(services.structuredContent.session_mode, "provider-managed");
   const result = await client.callTool({
     name: "playwright_run", arguments: { steps: [{ type: "navigate", url: "https://example.com" }] },
   });

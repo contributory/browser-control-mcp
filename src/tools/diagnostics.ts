@@ -4,7 +4,7 @@ import { ToolError } from "../util/errors.js";
 import { guarded, ok } from "./results.js";
 import type { AppContext } from "./context.js";
 
-const browserId = z.string().min(8).max(128);
+const browserId = z.string().min(8).max(1024);
 const bufferAction = z.enum(["start", "read", "clear"]);
 
 /**
@@ -14,45 +14,48 @@ const bufferAction = z.enum(["start", "read", "clear"]);
 export function registerDiagnosticTools(mcp: McpServer, ctx: AppContext, principal: string): void {
   const { config, sessions } = ctx;
 
-  mcp.registerTool(
-    "playwright_console",
-    {
-      title: "Console diagnostics",
-      description:
-        "Start, read, or clear a bounded buffer of console messages and page errors. Reads drain the buffer and report how many entries were dropped.",
-      inputSchema: z.object({
-        browser_id: browserId,
-        action: bufferAction,
+  if (ctx.sessionMode !== "provider-managed") {
+    mcp.registerTool(
+      "playwright_console",
+      {
+        title: "Console diagnostics",
+        description:
+          "Start, read, or clear a bounded buffer of console messages and page errors. Reads drain the buffer and report how many entries were dropped.",
+        inputSchema: z.object({
+          browser_id: browserId,
+          action: bufferAction,
+        }),
+        annotations: { readOnlyHint: true },
+      },
+      guarded(config.redactor, async ({ browser_id, action }) => {
+        const result = await sessions.withSession(browser_id, principal, async session =>
+          session.diagnostics.consoleAction(action),
+        );
+        return ok({ browser_id, action, ...result });
       }),
-      annotations: { readOnlyHint: true },
-    },
-    guarded(config.redactor, async ({ browser_id, action }) => {
-      const result = await sessions.withSession(browser_id, principal, async session =>
-        session.diagnostics.consoleAction(action),
-      );
-      return ok({ browser_id, action, ...result });
-    }),
-  );
+    );
 
-  mcp.registerTool(
-    "playwright_network",
-    {
-      title: "Network diagnostics",
-      description:
-        "Start, read, or clear a bounded buffer of request and response metadata. Headers and bodies are never captured; URL query strings are stripped.",
-      inputSchema: z.object({
-        browser_id: browserId,
-        action: bufferAction,
+    mcp.registerTool(
+      "playwright_network",
+      {
+        title: "Network diagnostics",
+        description:
+          "Start, read, or clear a bounded buffer of request and response metadata. Headers and bodies are never captured; URL query strings are stripped.",
+        inputSchema: z.object({
+          browser_id: browserId,
+          action: bufferAction,
+        }),
+        annotations: { readOnlyHint: true },
+      },
+      guarded(config.redactor, async ({ browser_id, action }) => {
+        const result = await sessions.withSession(browser_id, principal, async session =>
+          session.diagnostics.networkAction(action),
+        );
+        return ok({ browser_id, action, ...result });
       }),
-      annotations: { readOnlyHint: true },
-    },
-    guarded(config.redactor, async ({ browser_id, action }) => {
-      const result = await sessions.withSession(browser_id, principal, async session =>
-        session.diagnostics.networkAction(action),
-      );
-      return ok({ browser_id, action, ...result });
-    }),
-  );
+    );
+
+  }
 
   mcp.registerTool(
     "playwright_cdp_send",
@@ -83,7 +86,7 @@ export function registerDiagnosticTools(mcp: McpServer, ctx: AppContext, princip
     }),
   );
 
-  mcp.registerTool(
+  if (ctx.sessionMode !== "provider-managed") mcp.registerTool(
     "playwright_cdp_events",
     {
       title: "CDP event subscriptions (read-only, privileged)",

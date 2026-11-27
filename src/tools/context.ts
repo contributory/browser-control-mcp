@@ -1,4 +1,4 @@
-import type { SessionRegistry } from "../browser/sessions.js";
+import type { BrowserSessions } from "../browser/session-contract.js";
 import type { AppConfig } from "../config.js";
 import type { Providers } from "../providers/index.js";
 
@@ -6,7 +6,7 @@ import type { Providers } from "../providers/index.js";
 export interface AppContext {
   config: AppConfig;
   providers: Providers;
-  sessions: SessionRegistry;
+  sessions: BrowserSessions;
   /** Serverless invocations cannot guarantee persistent browser connections. */
-  sessionMode?: "persistent" | "request";
+  sessionMode?: "persistent" | "provider-managed" | "request";
 }

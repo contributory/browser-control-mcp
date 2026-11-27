@@ -15,6 +15,8 @@ export interface OpenOptions {
   maxLifetimeMs: number;
   /** Timeout for the provider's own create call. */
   timeoutMs: number;
+  /** Keep the browser alive across disconnected Playwright clients. */
+  reconnectable?: boolean;
 }
 
 /** A provider whose browsers can be driven through Playwright over CDP. */
@@ -22,4 +24,8 @@ export interface PlaywrightProvider {
   readonly name: string;
   readonly connectionKind: "cdp" | "playwright";
   open(options: OpenOptions): Promise<ProviderSession>;
+  /** Resolve the same active browser, or null if it has ended. */
+  resume?(providerSessionId: string): Promise<ProviderSession | null>;
+  /** Account-wide active count, for a conservative stateless admission check. */
+  activeCount?(): Promise<number>;
 }

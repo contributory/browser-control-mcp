@@ -233,7 +233,7 @@ export class ManagedSession {
     return [...this.sessions.values()].map(session => session.summary());
   }
 
-  async open(service: string | undefined, owner: string): Promise<ManagedSession> {
+  async open(service: string | undefined, owner: string, _mode?: "workflow"): Promise<ManagedSession> {
     if (this.closed) throw new ToolError("SESSION_EXPIRED", "The server is shutting down.");
     if (service === undefined) {
       const available = [...this.providers.playwright.keys()];

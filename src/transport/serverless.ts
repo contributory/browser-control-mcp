@@ -1,4 +1,4 @@
-import { SessionRegistry } from "../browser/sessions.js";
+import { ReconnectingRegistry } from "../browser/reconnecting.js";
 import { loadConfig } from "../config.js";
 import { createProviders } from "../providers/index.js";
 import { createWebHandler, type WebHandlerOptions } from "./web.js";
@@ -16,9 +16,9 @@ export async function handleServerless(request: Request, env: NodeJS.ProcessEnv,
       headers: { "Cache-Control": "no-store" },
     });
   }
-  const sessions = new SessionRegistry(config, providers);
+  const sessions = new ReconnectingRegistry(config, providers);
   try {
-    return await createWebHandler({ config, providers, sessions, sessionMode: "request" }, options)(request);
+    return await createWebHandler({ config, providers, sessions, sessionMode: "provider-managed" }, options)(request);
   } finally {
     await sessions.closeAll();
   }

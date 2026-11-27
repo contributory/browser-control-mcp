@@ -66,10 +66,13 @@ try {
   const names = (await list.json()).result.tools.map(tool => tool.name);
   assert(names.includes("playwright_run"));
   assert(names.includes("phantomjscloud_render"));
-  assert(!names.includes("playwright_open"));
+  assert(names.includes("playwright_open"));
+  assert(names.includes("playwright_cdp_send"));
+  assert(!names.includes("playwright_console"));
+  assert.equal(names.length, 15);
   const services = await post({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "playwright_list_services", arguments: {} } });
   assert.equal(services.status, 200);
-  assert.equal((await services.json()).result.structuredContent.session_mode, "request");
+  assert.equal((await services.json()).result.structuredContent.session_mode, "provider-managed");
   console.log("PASS: Convex HTTP routing, auth, CORS, limits, internal Node action, MCP initialize/list/call.");
 } finally {
   for (const [key, value] of Object.entries(previous)) {

@@ -4,9 +4,10 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as ops from "../browser/operations.js";
 import { ToolError, isToolError } from "../util/errors.js";
 import { guarded, image, ok } from "./results.js";
+import type { ManagedSession } from "../browser/sessions.js";
 import type { AppContext } from "./context.js";
 
-const browserId = z.string().min(8).max(128).describe("browser_id returned by playwright_open.");
+const browserId = z.string().min(8).max(1024).describe("browser_id returned by playwright_open.");
 const selectorSchema = z.string().min(1).max(2_000).describe("Playwright/CSS selector.");
 const timeoutSchema = z
   .number()
@@ -37,6 +38,7 @@ export function registerPlaywrightTools(mcp: McpServer, ctx: AppContext, princip
         capabilities: {
           evaluate: ctx.sessionMode !== "request" && config.diagnostics.evaluateEnabled,
           cdp: ctx.sessionMode !== "request" && config.diagnostics.cdpEnabled,
+          continuous_diagnostics: !ctx.sessionMode || ctx.sessionMode === "persistent",
         },
         destination_policy: {
           mode: config.destinations.configured ? "allowlist" : "public-http-only",
@@ -45,7 +47,8 @@ export function registerPlaywrightTools(mcp: McpServer, ctx: AppContext, princip
         limits: {
           sessions_per_principal: config.session.maxSessionsPerPrincipal,
           max_lifetime_ms: config.session.maxLifetimeMs,
-          idle_ttl_ms: config.session.idleTtlMs,
+          idle_ttl_ms: ctx.sessionMode === "provider-managed" ? null : config.session.idleTtlMs,
+          quota_scope: ctx.sessionMode === "provider-managed" ? "provider-account-admission" : "process",
           max_output_bytes: config.session.maxOutputBytes,
           max_action_steps: config.session.maxActionSteps,
         },
@@ -59,7 +62,7 @@ export function registerPlaywrightTools(mcp: McpServer, ctx: AppContext, princip
       {
         title: "Open remote browser",
         description:
-          "Create a remote browser session and return a random browser_id. When service is omitted, randomly choose an available Hyperbrowser or BrowserCloud service, or a custom service if neither is available.",
+          "Create a remote browser session and return an opaque browser_id. In provider-managed mode select a reconnectable service from playwright_list_services; otherwise select any configured service. When omitted, the server selects a compatible service.",
         inputSchema: z.object({
           service: z.string().trim().min(1).max(64).optional().describe("Optional service name from playwright_list_services."),
         }),
@@ -294,7 +297,7 @@ function registerActTool(mcp: McpServer, ctx: AppContext, principal: string): vo
     guarded(config.redactor, async ({ service, steps, screenshot }) => {
       // Validate before allocating a paid provider session.
       assertStepCount(steps.length);
-      const session = await sessions.open(service?.toLowerCase(), principal);
+      const session = await sessions.open(service?.toLowerCase(), principal, "workflow");
       try {
         const result = await executeSteps(session.id, steps);
         if (result.isError) return result;
@@ -324,14 +327,17 @@ function registerActTool(mcp: McpServer, ctx: AppContext, principal: string): vo
     }
   }
 
-  async function executeSteps(browser_id: string, steps: z.infer<typeof actStep>[]): Promise<CallToolResult> {
+  async function executeSteps(browser_id: string, steps: z.infer<typeof actStep>[], attached?: ManagedSession): Promise<CallToolResult> {
     assertStepCount(steps.length);
+    if (!attached && ctx.sessionMode === "provider-managed" && browser_id.startsWith("r1_")) {
+      return sessions.withSession(browser_id, principal, session => executeSteps(browser_id, steps, session));
+    }
     const completed: Array<{ index: number; type: string; detail: Record<string, unknown> }> = [];
     const total = steps.length;
 
     for (const [index, step] of steps.entries()) {
       try {
-        const detail = await sessions.withSession(browser_id, principal, async session => {
+        const perform = async (session: ManagedSession) => {
           const page = session.page;
           switch (step.type) {
             case "navigate": {
@@ -365,7 +371,8 @@ function registerActTool(mcp: McpServer, ctx: AppContext, principal: string): vo
               return { waited_ms: ms };
             }
           }
-        });
+        };
+        const detail = attached ? await perform(attached) : await sessions.withSession(browser_id, principal, perform);
         completed.push({ index, type: step.type, detail });
       } catch (error) {
         const code = isToolError(error) ? error.code : "INTERNAL_ERROR";

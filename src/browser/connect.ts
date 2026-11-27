@@ -14,6 +14,7 @@ export interface Connection {
 export async function connectRemote(
   session: ProviderSession,
   timeoutMs: number,
+  existingContextOnly = false,
 ): Promise<Connection> {
   const browser =
     session.connectionKind === "playwright"
@@ -21,7 +22,9 @@ export async function connectRemote(
       : await chromium.connectOverCDP(session.endpoint, { timeout: timeoutMs });
 
   try {
-    const context = browser.contexts()[0] ?? (await browser.newContext());
+    const existing = browser.contexts()[0];
+    if (!existing && existingContextOnly) throw new Error("Provider did not expose a persistent browser context");
+    const context = existing ?? (await browser.newContext());
     const page = await pickPage(context);
     return { browser, context, page };
   } catch (error) {
